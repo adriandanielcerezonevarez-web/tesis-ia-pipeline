@@ -1,0 +1,8 @@
+# Dependencias del sistema de análisis de código con IA
+# Pipeline CI/CD con GitHub Actions + Groq API (Llama 3)
+
+# Cliente oficial de Groq API (modelos open source: Llama 3, Mixtral, DeepSeek)
+groq>=0.9.0
+
+# Utilidades de procesamiento
+pathlib2>=2.3.7;python_version<"3.4"
