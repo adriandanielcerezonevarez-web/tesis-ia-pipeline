@@ -27,7 +27,7 @@ except ImportError:
 #  CONFIGURACIÓN DEL MODELO DE IA
 # ─────────────────────────────────────────────────────────────
 
-MODELO_IA = "llama-3.1-70b-versatile"   # Modelo open source vía Groq
+MODELO_IA = "llama-3.3-70b-versatile"   # Modelo open source vía Groq
 TEMPERATURA = 0.2                         # Baja temperatura = respuestas más consistentes
 MAX_TOKENS = 4096
 
