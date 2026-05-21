@@ -125,6 +125,7 @@ jobs:
       - name: Ejecutar análisis de calidad con IA
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         id: analisis-ia
+        continue-on-error: true   # El reporte se publica aunque el pipeline bloquee el merge
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
@@ -143,6 +144,7 @@ jobs:
       # ── Publicar reporte como comentario en el PR ──
       - name: Publicar reporte de IA en el Pull Request
         if: >
+          always() &&
           github.event_name == 'pull_request' &&
           steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         uses: actions/github-script@v7
@@ -199,7 +201,7 @@ jobs:
 
       # ── Guardar el reporte como artefacto descargable ──
       - name: Guardar reporte como artefacto
-        if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
+        if: always() && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: reporte-analisis-ia
@@ -210,7 +212,7 @@ jobs:
 
       # ── Resumen en el panel de GitHub Actions ──
       - name: Publicar resumen en el panel de GitHub Actions
-        if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
+        if: always() && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         run: |
           if [ -f reporte-ia.md ]; then
             echo "## 🤖 Reporte de IA" >> $GITHUB_STEP_SUMMARY
