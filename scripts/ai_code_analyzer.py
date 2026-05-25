@@ -178,7 +178,7 @@ def generar_reporte_markdown(resultados: list[dict]) -> str:
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     lineas = [
-        "# 🤖 Reporte de Análisis de Calidad de Código — IA Pipeline",
+        "# Reporte de Análisis de Calidad de Código — Pipeline CI/CD",
         f"*Generado automáticamente el {ahora} por el modelo de IA integrado en el pipeline CI/CD*",
         f"*Modelo utilizado: `{MODELO_IA}` (open source vía Groq API)*",
         "",
@@ -198,7 +198,7 @@ def generar_reporte_markdown(resultados: list[dict]) -> str:
         emoji_estado = "✅" if puntaje_promedio >= 7 else ("⚠️" if puntaje_promedio >= 5 else "❌")
 
         lineas += [
-            "## 📊 Resumen Ejecutivo",
+            "## Resumen Ejecutivo",
             "",
             f"| Métrica | Valor |",
             f"|---------|-------|",
@@ -211,7 +211,7 @@ def generar_reporte_markdown(resultados: list[dict]) -> str:
 
         if archivos_bloqueados:
             lineas += [
-                "### 🚫 Archivos que requieren corrección antes del merge:",
+                "### Archivos que requieren corrección antes del merge:",
                 "",
             ]
             for r in archivos_bloqueados:
@@ -226,7 +226,7 @@ def generar_reporte_markdown(resultados: list[dict]) -> str:
         archivo = resultado["archivo"]
         analisis = resultado["analisis"]
 
-        lineas += [f"## 📄 `{archivo}`", ""]
+        lineas += [f"## `{archivo}`", ""]
 
         if "error" in analisis:
             lineas += [
@@ -256,7 +256,7 @@ def generar_reporte_markdown(resultados: list[dict]) -> str:
         # Problemas críticos
         problemas = analisis.get("problemas_criticos", [])
         if problemas:
-            lineas += ["### 🔴 Problemas Críticos", ""]
+            lineas += ["### Problemas Críticos", ""]
             for p in problemas:
                 lineas.append(f"- {p}")
             lineas.append("")
@@ -264,7 +264,7 @@ def generar_reporte_markdown(resultados: list[dict]) -> str:
         # Recomendaciones prioritarias
         recomendaciones = analisis.get("recomendaciones_prioritarias", [])
         if recomendaciones:
-            lineas += ["### 💡 Recomendaciones Prioritarias", ""]
+            lineas += ["### Recomendaciones Prioritarias", ""]
             for i, r in enumerate(recomendaciones, 1):
                 lineas.append(f"{i}. {r}")
             lineas.append("")
@@ -272,7 +272,7 @@ def generar_reporte_markdown(resultados: list[dict]) -> str:
         # Análisis por dimensión
         dimensiones = analisis.get("dimensiones", [])
         if dimensiones:
-            lineas += ["### 🔍 Análisis por Dimensión", ""]
+            lineas += ["### Análisis por Dimensión", ""]
             lineas += [
                 "| Dimensión | Puntuación | Estado |",
                 "|-----------|-----------|--------|",
@@ -442,3 +442,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+                                
