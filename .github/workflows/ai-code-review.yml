@@ -8,7 +8,7 @@
 #  Autor: Adrian Daniel Cerezo Nevarez
 # ============================================================
 
-name: "🤖 Análisis de Calidad de Código con IA"
+name: "Análisis de Calidad de Código con IA"
 
 on:
   pull_request:
@@ -29,7 +29,7 @@ jobs:
   #  JOB 1: Análisis estático tradicional (linting, tests)
   # ──────────────────────────────────────────────────────────
   analisis-tradicional:
-    name: "🔍 Validación Estática (Linting + Tests)"
+    name: "Validación Estática (Linting + Tests)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del repositorio
@@ -65,7 +65,7 @@ jobs:
   #  JOB 2: Análisis de calidad con IA (depende del Job 1)
   # ──────────────────────────────────────────────────────────
   analisis-ia:
-    name: "🤖 Análisis de Calidad con IA (Llama 3)"
+    name: "Análisis de Calidad con IA (Llama 3)"
     runs-on: ubuntu-latest
     needs: analisis-tradicional   # Se ejecuta después del análisis estático
     if: always()                   # Siempre corre, incluso si el Job 1 falla
@@ -215,7 +215,7 @@ jobs:
         if: always() && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         run: |
           if [ -f reporte-ia.md ]; then
-            echo "## 🤖 Reporte de IA" >> $GITHUB_STEP_SUMMARY
+            echo "## Reporte de Análisis de Calidad" >> $GITHUB_STEP_SUMMARY
             cat reporte-ia.md >> $GITHUB_STEP_SUMMARY
           fi
 
@@ -254,3 +254,4 @@ jobs:
           fi
 
           echo "✅ Todos los análisis pasaron correctamente. El código está listo."
+  
