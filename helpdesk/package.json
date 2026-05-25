@@ -1,0 +1,37 @@
+{
+  "name": "helpdesk-pro",
+  "productName": "HELPDESK ARCE-CEREZO",
+  "version": "2.0.0",
+  "description": "Sistema de gestión de tickets de soporte técnico",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "author": "Adrian",
+  "license": "ISC",
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^29.1.5",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.helpdeskpro.app",
+    "productName": "HELPDESK ARCE-CEREZO",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
+    }
+  }
+}

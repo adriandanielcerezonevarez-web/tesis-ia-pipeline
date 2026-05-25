@@ -1,0 +1,14 @@
+{
+  "hosting": {
+    "site": "helpdesk-arce-cerezo",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "dist/**",
+      "package*",
+      "main.js"
+    ]
+  }
+}
