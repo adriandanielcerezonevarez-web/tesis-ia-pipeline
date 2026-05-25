@@ -254,4 +254,3 @@ jobs:
           fi
 
           echo "✅ Todos los análisis pasaron correctamente. El código está listo."
-  
