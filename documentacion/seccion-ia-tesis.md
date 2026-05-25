@@ -22,7 +22,7 @@ Para la integración con el pipeline CI/CD se evaluaron múltiples alternativas 
 
 ### 3.2.2 Modelo Seleccionado: Llama 3.1 70B vía Groq API
 
-Tras la evaluación comparativa, se seleccionó el modelo **Llama 3.1 70B Versatile** desarrollado por Meta AI, consumido a través de la plataforma **Groq API**.
+Tras la evaluación comparativa, se seleccionó el modelo **Llama 3.3 70B Versatile** desarrollado por Meta AI, consumido a través de la plataforma **Groq API**.
 
 **Justificación técnica:**
 
