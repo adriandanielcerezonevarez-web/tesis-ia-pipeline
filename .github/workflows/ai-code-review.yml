@@ -2,7 +2,7 @@
 #  AI CODE REVIEW — GitHub Actions Workflow
 # ============================================================
 #  Pipeline CI/CD con análisis de calidad de código mediante IA
-#  Modelo: Llama 3.1 70B (open source) vía Groq API
+#  Modelo: Llama 3.3 70B (open source) vía Groq API
 #
 #  Tesis: Diseño de un modelo de uso de IA en pipelines CI/CD
 #  Autor: Adrian Daniel Cerezo Nevarez
@@ -254,3 +254,43 @@ jobs:
           fi
 
           echo "✅ Todos los análisis pasaron correctamente. El código está listo."
+
+  # ──────────────────────────────────────────────────────────
+  #  JOB 4: Despliegue automático al VPS (solo si el gate pasa)
+  # ──────────────────────────────────────────────────────────
+  despliegue:
+    name: "🚀 Despliegue Automático al VPS"
+    runs-on: ubuntu-latest
+    needs: quality-gate
+    # Solo despliega en push a main y si el Quality Gate pasó
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Copiar archivos del HelpDesk al VPS (SCP)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "helpdesk-deploy"
+          target: "/root/deploy-nuevo"
+
+      - name: Desplegar con Docker en el VPS (SSH)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            echo "🚀 Iniciando despliegue automático..."
+            rm -rf /root/helpdesk
+            mv /root/deploy-nuevo/helpdesk-deploy /root/helpdesk
+            rm -rf /root/deploy-nuevo
+            cd /root/helpdesk
+            docker compose up -d --build
+            docker image prune -f
+            echo "✅ Despliegue completado. HelpDesk actualizado en http://${{ secrets.VPS_HOST }}"
