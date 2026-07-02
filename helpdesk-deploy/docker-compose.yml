@@ -1,16 +1,17 @@
 services:
-  helpdesk-prod:
-    build: .
-    image: helpdesk-arce-cerezo:latest
-    container_name: helpdesk-prod
+  helpdesk:
+    image: caddy:alpine
+    container_name: helpdesk
+    restart: unless-stopped
     ports:
       - "80:80"
-    restart: unless-stopped
+      - "443:443"
+    volumes:
+      - ./html:/srv
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
 
-  helpdesk-staging:
-    build: .
-    image: helpdesk-arce-cerezo:latest
-    container_name: helpdesk-staging
-    ports:
-      - "8080:80"
-    restart: unless-stopped
+volumes:
+  caddy_data:
+  caddy_config:
