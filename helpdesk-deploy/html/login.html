@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Helpdesk</title>
+  <style>
+    /* reset */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: #fafafa;
+      color: #222;
+      font-size: 13px;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 360px;
+      background: #fff;
+      border: 1px solid #d9d9d9;
+      border-radius: 4px;
+      padding: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .login-logo { margin-bottom: 18px; }
+    .login-logo-text { font-size: 14px; font-weight: 600; color: #222; }
+    .login-logo-text span { color: #c2410c; }
+
+    .login-headline { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .login-sub { font-size: 12px; color: #888; margin-bottom: 18px; }
+
+    .form-group { margin-bottom: 12px; }
+    .form-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #555;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .input-wrapper { position: relative; }
+    .input-icon {
+      position: absolute; left: 8px; top: 50%;
+      transform: translateY(-50%); color: #999; pointer-events: none;
+    }
+    .form-input {
+      width: 100%;
+      padding: 7px 8px 7px 30px;
+      background: #fff;
+      border: 1px solid #d9d9d9;
+      border-radius: 3px;
+      color: #222;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    .form-input::placeholder { color: #aaa; }
+    .form-input:focus { border-color: #c2410c; }
+    .form-input.error { border-color: #c62828; }
+
+    .pwd-toggle {
+      position: absolute; right: 8px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none; cursor: pointer;
+      color: #999; padding: 2px;
+    }
+    .pwd-toggle:hover { color: #555; }
+
+    .error-msg {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      background: #fadbdb;
+      border: 1px solid #c62828;
+      border-radius: 3px;
+      padding: 7px 10px;
+      font-size: 12px;
+      color: #c62828;
+      margin-bottom: 12px;
+    }
+    .error-msg.show { display: flex; }
+
+    .btn-login {
+      width: 100%;
+      padding: 8px 14px;
+      background: #c2410c;
+      border: 1px solid #c2410c;
+      border-radius: 3px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      margin-top: 6px;
+    }
+    .btn-login:hover { background: #e25a1c; border-color: #e25a1c; }
+    .btn-login:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .btn-login .spinner {
+      display: none;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin: 0 auto;
+    }
+    .btn-login.loading .btn-text { display: none; }
+    .btn-login.loading .spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .demo-hint {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid #d9d9d9;
+    }
+    .demo-hint-title {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 6px;
+    }
+    .demo-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .demo-chip {
+      padding: 4px 8px;
+      background: #f3f3f3;
+      border: 1px solid #d9d9d9;
+      border-radius: 3px;
+      font-size: 11px;
+      color: #555;
+      cursor: pointer;
+      font-family: ui-monospace, Consolas, monospace;
+    }
+    .demo-chip:hover { background: #ececec; border-color: #c2410c; }
+    .demo-chip strong { color: #222; }
+    .chip-role { display: block; font-size: 10px; color: #999; margin-top: 1px; }
+
+    .login-footer {
+      margin-top: 18px;
+      text-align: center;
+      font-size: 11px;
+      color: #888;
+    }
+    .login-footer a { color: #c2410c; text-decoration: none; }
+  </style>
+
+  <!-- firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+</head>
+
+<body>
+  <div class="login-card">
+
+    <div class="login-logo">
+      <span class="login-logo-text">Helpdesk <span>arce-cerezo</span></span>
+    </div>
+
+    <h1 class="login-headline">Iniciar sesión</h1>
+    <p class="login-sub">Introduce tus credenciales</p>
+
+      <div class="error-msg" id="errorMsg">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <span id="errorText">Usuario o contraseña incorrectos</span>
+      </div>
+
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label class="form-label" for="loginUsername">Usuario</label>
+          <div class="input-wrapper">
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+            </span>
+            <input class="form-input" type="text" id="loginUsername" placeholder="Tu nombre de usuario"
+              autocomplete="username" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="loginPassword">Contraseña</label>
+          <div class="input-wrapper">
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </span>
+            <input class="form-input" type="password" id="loginPassword" placeholder="Tu contraseña"
+              autocomplete="current-password" required />
+            <button type="button" class="pwd-toggle" id="pwdToggle" onclick="togglePassword()"
+              title="Mostrar contraseña">
+              <svg id="eyeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-login" id="loginBtn">
+          <span class="btn-text">Entrar</span>
+          <span class="spinner"></span>
+        </button>
+      </form>
+
+      <div class="demo-hint">
+        <div class="demo-hint-title">Usuarios de prueba (clic para rellenar):</div>
+        <div class="demo-chips">
+          <div class="demo-chip" onclick="fillDemo('admin','admin123')">
+            <strong>admin</strong> / admin123
+            <span class="chip-role">admin</span>
+          </div>
+          <div class="demo-chip" onclick="fillDemo('profesor','profesor123')">
+            <strong>profesor</strong> / profesor123
+            <span class="chip-role">admin</span>
+          </div>
+          <div class="demo-chip" onclick="fillDemo('adrian','user123')">
+            <strong>adrian</strong> / user123
+            <span class="chip-role">usuario</span>
+          </div>
+          <div class="demo-chip" onclick="fillDemo('allison','user456')">
+            <strong>allison</strong> / user456
+            <span class="chip-role">usuario</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="login-footer">
+        helpdesk arce-cerezo v2.0
+      </div>
+  </div>
+
+  <script>
+    // claves localStorage
+    const USERS_KEY = 'helpdesk_users';
+    const SESSION_KEY = 'helpdesk_session';
+
+    // intenta arrancar firebase
+    let db = null;
+    if (typeof FIREBASE_CONFIGURED !== 'undefined' && FIREBASE_CONFIGURED) {
+      try {
+        // evita error de doble inicialización si la página recarga
+        if (!firebase.apps.length) {
+          firebase.initializeApp(FIREBASE_CONFIG);
+        }
+        db = firebase.firestore();
+        console.log('firestore conectado (login)');
+      } catch (err) {
+        console.warn('firebase init falló:', err);
+        db = null;
+      }
+    }
+
+    // muestra en el footer si vamos online o en local
+    function setOnlineIndicator(online) {
+      const footer = document.querySelector('.login-footer');
+      if (!footer) return;
+      const badge = online
+        ? '<span style="color:#2e7d32">online</span>'
+        : '<span style="color:#b76e00">modo local</span>';
+      footer.innerHTML = 'helpdesk arce-cerezo v2.0 &middot; ' + badge;
+    }
+
+    // usuarios por defecto (se cargan si la BD está vacía)
+    const DEFAULT_USERS = [
+      { id: 'u1', username: 'admin', password: 'admin123', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
+      { id: 'u2', username: 'profesor', password: 'profesor123', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
+      { id: 'u3', username: 'adrian', password: 'user123', name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
+      { id: 'u4', username: 'allison', password: 'user456', name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
+    ];
+
+    async function seedUsers() {
+      if (db) {
+        try {
+          const snap = await db.collection('users').get();
+          let needsUpdate = snap.empty;
+          // TODO: quitar esto cuando los usuarios ya estén bien en prod
+          snap.docs.forEach(d => {
+            const data = d.data();
+            if (data.id === 'u3' && (data.username !== 'adrian' || data.password !== 'user123')) needsUpdate = true;
+            if (data.id === 'u4' && (data.username !== 'allison' || data.password !== 'user456')) needsUpdate = true;
+            if (data.id === 'u2' && (data.username !== 'profesor' || data.password !== 'profesor123')) needsUpdate = true;
+          });
+
+          if (needsUpdate) {
+            const batch = db.batch();
+            DEFAULT_USERS.forEach(u => batch.set(db.collection('users').doc(u.id), u));
+            await batch.commit();
+          }
+          setOnlineIndicator(true);
+        } catch (err) {
+          console.error('seedUsers fb:', err);
+          seedUsersLocal();
+          setOnlineIndicator(false);
+        }
+      } else {
+        seedUsersLocal();
+        setOnlineIndicator(false);
+      }
+    }
+
+    function seedUsersLocal() {
+      const existing = JSON.parse(localStorage.getItem(USERS_KEY) || 'null');
+      if (!existing) localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
+    }
+
+    function handleLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('loginBtn');
+      btn.classList.add('loading');
+      btn.disabled = true;
+      hideError();
+
+      const username = document.getElementById('loginUsername').value.trim().toLowerCase();
+      const password = document.getElementById('loginPassword').value;
+
+      if (db) {
+        db.collection('users')
+          .where('username', '==', username)
+          .where('password', '==', password)
+          .get()
+          .then(snap => {
+            if (!snap.empty) {
+              const user = snap.docs[0].data();
+              const session = { userId: user.id, username: user.username, name: user.name, role: user.role, loginAt: new Date().toISOString() };
+              sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+              window.location.href = 'index.html';
+            } else {
+              showError('Usuario o contraseña incorrectos.');
+              document.getElementById('loginPassword').value = '';
+              document.getElementById('loginUsername').classList.add('error');
+              document.getElementById('loginPassword').classList.add('error');
+              btn.classList.remove('loading');
+              btn.disabled = false;
+            }
+          })
+          .catch(err => {
+            // si falla firebase, probamos contra localStorage
+            console.error('login fb:', err);
+            loginLocal(username, password, btn);
+          });
+      } else {
+        // pequeño delay para que se vea el spinner
+        setTimeout(() => loginLocal(username, password, btn), 600);
+      }
+    }
+
+    function loginLocal(username, password, btn) {
+      const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+      const user = users.find(u => u.username.toLowerCase() === username && u.password === password);
+      if (user) {
+        const session = { userId: user.id, username: user.username, name: user.name, role: user.role, loginAt: new Date().toISOString() };
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        window.location.href = 'index.html';
+      } else {
+        showError('Usuario o contraseña incorrectos.');
+        document.getElementById('loginPassword').value = '';
+        document.getElementById('loginUsername').classList.add('error');
+        document.getElementById('loginPassword').classList.add('error');
+        btn.classList.remove('loading');
+        btn.disabled = false;
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('errorMsg');
+      document.getElementById('errorText').textContent = msg;
+      el.classList.add('show');
+    }
+    function hideError() {
+      document.getElementById('errorMsg').classList.remove('show');
+      document.querySelectorAll('.form-input').forEach(i => i.classList.remove('error'));
+    }
+
+    function togglePassword() {
+      const pwd = document.getElementById('loginPassword');
+      const icon = document.getElementById('eyeIcon');
+      const show = pwd.type === 'password';
+      pwd.type = show ? 'text' : 'password';
+      icon.innerHTML = show
+        ? `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>`
+        : `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`;
+    }
+
+    function fillDemo(user, pass) {
+      document.getElementById('loginUsername').value = user;
+      document.getElementById('loginPassword').value = pass;
+      hideError();
+      document.getElementById('loginUsername').focus();
+    }
+
+    // si ya hay sesión, saltamos al index
+    const existingSession = sessionStorage.getItem(SESSION_KEY);
+    if (existingSession) window.location.href = 'index.html';
+
+    // limpia el mensaje de error cuando el usuario empieza a escribir
+    document.querySelectorAll('.form-input').forEach(input => {
+      input.addEventListener('input', hideError);
+    });
+
+    // Inicializar
+    seedUsers();
+  </script>
+</body>
+
+</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                     

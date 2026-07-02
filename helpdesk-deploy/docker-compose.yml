@@ -1,0 +1,16 @@
+services:
+  helpdesk-prod:
+    build: .
+    image: helpdesk-arce-cerezo:latest
+    container_name: helpdesk-prod
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+  helpdesk-staging:
+    build: .
+    image: helpdesk-arce-cerezo:latest
+    container_name: helpdesk-staging
+    ports:
+      - "8080:80"
+    restart: unless-stopped
