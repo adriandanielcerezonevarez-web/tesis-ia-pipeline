@@ -266,31 +266,29 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout del repositorio
-        uses: actions/checkout@v4
-
-      - name: Copiar archivos del HelpDesk al VPS (SCP)
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "helpdesk-deploy"
-          target: "/root/deploy-nuevo"
-
-      - name: Desplegar con Docker en el VPS (SSH)
+      # Una sola conexión SSH: el servidor actualiza el código con git y redespliega.
+      # (Evita SCP, que abre 2 conexiones y choca con el anti-abuso de red de Hostinger.)
+      - name: Desplegar en el VPS por SSH (git pull + Docker)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: "20m"
           script: |
             set -e
             echo "🚀 Iniciando despliegue automático..."
-            rm -rf /root/helpdesk
-            mv /root/deploy-nuevo/helpdesk-deploy /root/helpdesk
-            rm -rf /root/deploy-nuevo
-            cd /root/helpdesk
-            docker compose up -d --build
+            REPO=/root/tesis-ia-pipeline
+            if [ ! -d "$REPO/.git" ]; then
+              git clone https://github.com/adriandanielcerezonevarez-web/tesis-ia-pipeline.git "$REPO"
+            fi
+            cd "$REPO"
+            git fetch origin main
+            git reset --hard origin/main
+            # Limpiar contenedores previos que puedan ocupar los puertos 80/443
+            docker rm -f helpdesk helpdesk-prod helpdesk-staging 2>/dev/null || true
+            cd "$REPO/helpdesk-deploy"
+            docker compose up -d --build --remove-orphans
             docker image prune -f
-            echo "✅ Despliegue completado. HelpDesk actualizado en http://${{ secrets.VPS_HOST }}"
+            echo "✅ Despliegue completado. HelpDesk en https://helpdesk-arce.duckdns.org"
+
