@@ -1,0 +1,178 @@
+# ============================================================
+#  CORRECCIÓN DE CÓDIGO CON IA — GitHub Actions Workflow
+# ============================================================
+#  Responde a comentarios en Pull Requests:
+#    /fix-ia      → la IA corrige el código y sube un commit
+#    /fix-manual  → registra que el desarrollador corrige a mano
+#
+#  Tesis: Diseño de un modelo de uso de IA en pipelines CI/CD
+#  Autor: Adrian Daniel Cerezo Nevarez
+# ============================================================
+
+name: "Corrección de Código con IA"
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────
+  #  /fix-ia : la IA corrige el código y sube un nuevo commit
+  # ──────────────────────────────────────────────────────────
+  fix-ia:
+    name: "🤖 Corrección Automática con IA"
+    runs-on: ubuntu-latest
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/fix-ia')
+
+    steps:
+      - name: Reaccionar al comentario (procesando)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
+      - name: Obtener rama del Pull Request
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_ref', pr.data.head.ref);
+
+      - name: Checkout de la rama del PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install groq
+
+      - name: Detectar archivos de código del PR
+        id: archivos
+        run: |
+          git fetch origin main --depth=1 || true
+          ARCHIVOS=$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs"
+          LISTA=$(echo "$ARCHIVOS" | grep -E "\.(${EXTENSIONES})$" | tr '\n' ' ' | xargs || true)
+          echo "Archivos detectados: $LISTA"
+          echo "lista=$LISTA" >> $GITHUB_OUTPUT
+
+      - name: Analizar, corregir y re-analizar con IA
+        if: steps.archivos.outputs.lista != ''
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          ARCHIVOS="${{ steps.archivos.outputs.lista }}"
+          echo "===== Análisis ANTES de corregir ====="
+          python scripts/ai_code_analyzer.py --json --output reporte-antes.md $ARCHIVOS || true
+          echo "===== Corrección con IA ====="
+          python scripts/ai_code_fixer.py --reporte reporte-antes.json $ARCHIVOS
+          echo "===== Análisis DESPUÉS de corregir ====="
+          python scripts/ai_code_analyzer.py --json --output reporte-despues.md $ARCHIVOS || true
+
+      - name: Commit y push de las correcciones
+        id: commit
+        if: steps.archivos.outputs.lista != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ${{ steps.archivos.outputs.lista }}
+          if git diff --cached --quiet; then
+            echo "cambios=false" >> $GITHUB_OUTPUT
+            echo "No hubo cambios que aplicar."
+          else
+            git commit -m "fix(ia): correcciones automáticas aplicadas por IA"
+            git push origin HEAD:${{ steps.pr.outputs.head_ref }}
+            echo "cambios=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publicar reporte de la corrección en el PR
+        if: always() && steps.archivos.outputs.lista != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let cuerpo = '## 🤖 Corrección automática con IA (`/fix-ia`)\n\n';
+            const cambios = '${{ steps.commit.outputs.cambios }}';
+            if (cambios === 'true') {
+              cuerpo += 'La IA aplicó correcciones y subió un nuevo commit a esta rama. ';
+              cuerpo += 'A continuación, la puntuación del código **después** de la corrección:\n\n';
+            } else {
+              cuerpo += 'La IA no encontró cambios que aplicar (el código ya cumplía la calidad).\n\n';
+            }
+            try {
+              const despues = fs.readFileSync('reporte-despues.md', 'utf8');
+              cuerpo += despues.substring(0, 55000);
+            } catch (e) {
+              cuerpo += '_No se pudo generar el reporte posterior._';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: cuerpo
+            });
+
+      - name: Avisar si no había archivos de código
+        if: steps.archivos.outputs.lista == ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '⚠️ No se detectaron archivos de código en este PR para corregir con IA.'
+            });
+
+  # ──────────────────────────────────────────────────────────
+  #  /fix-manual : el desarrollador corrige el código a mano
+  # ──────────────────────────────────────────────────────────
+  fix-manual:
+    name: "📝 Corrección Manual"
+    runs-on: ubuntu-latest
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/fix-manual')
+
+    steps:
+      - name: Reaccionar y publicar instrucciones
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: '+1'
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '📝 **Modo corrección manual seleccionado.**\n\nRevisa las recomendaciones del reporte de análisis de IA en este Pull Request, aplica los cambios en tu código y vuelve a subir un commit a esta rama. El pipeline analizará automáticamente los nuevos cambios y actualizará la puntuación de calidad.'
+            });
