@@ -277,7 +277,7 @@ jobs:
           command_timeout: "20m"
           script: |
             set -e
-            echo "🚀 Iniciando despliegue automático..."
+            echo " Iniciando despliegue automático..."
             REPO=/root/tesis-ia-pipeline
             if [ ! -d "$REPO/.git" ]; then
               git clone https://github.com/adriandanielcerezonevarez-web/tesis-ia-pipeline.git "$REPO"
