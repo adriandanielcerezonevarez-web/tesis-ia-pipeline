@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Panel de Control — Pipeline CI/CD con IA</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.2/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2230; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #4c8bf5;
+    --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #a371f7;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); }
+  .header { background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .header .sub { color: var(--muted); font-size: 13px; }
+  .nav { display: flex; gap: 6px; }
+  .nav button { background: transparent; color: var(--muted); border: 1px solid transparent;
+    padding: 7px 14px; border-radius: 7px; cursor: pointer; font-size: 14px; }
+  .nav button.active { background: var(--panel2); color: var(--text); border-color: var(--border); }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 28px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 14px; }
+  .pr-row { display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+    transition: border-color .15s; }
+  .pr-row:hover { border-color: var(--accent); }
+  .pr-title { font-weight: 600; font-size: 15px; }
+  .pr-meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px;
+    font-weight: 600; }
+  .score { font-size: 26px; font-weight: 700; min-width: 90px; text-align: center; }
+  .score small { font-size: 13px; color: var(--muted); font-weight: 400; }
+  .pill { padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 6px; }
+  .pill.open { background: #12331f; color: var(--green); }
+  .pill.merged { background: #2b213f; color: var(--purple); }
+  .pill.closed { background: #3a1d1d; color: var(--red); }
+  .btn { border: none; padding: 9px 16px; border-radius: 7px; font-size: 14px; font-weight: 600;
+    cursor: pointer; margin-right: 8px; }
+  .btn-fix { background: var(--purple); color: #fff; }
+  .btn-deploy { background: var(--green); color: #06210e; }
+  .btn-ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .back { color: var(--muted); cursor: pointer; font-size: 14px; margin-bottom: 14px; display: inline-block; }
+  .diff { background: #0b0f14; border: 1px solid var(--border); border-radius: 8px; overflow-x: auto;
+    font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; margin-top: 8px; }
+  .diff .line { padding: 1px 12px; white-space: pre; }
+  .diff .add { background: rgba(63,185,80,.15); color: #7ee787; }
+  .diff .del { background: rgba(248,81,73,.15); color: #ffa198; }
+  .diff .hunk { background: rgba(76,139,245,.12); color: #79c0ff; }
+  .diff .ctx { color: var(--muted); }
+  .filehead { font-weight: 600; font-size: 13px; margin: 16px 0 4px; color: var(--text); }
+  .filehead small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  .report { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 4px 20px; margin-top: 14px; font-size: 14px; overflow-x: auto; }
+  .report table { border-collapse: collapse; }
+  .report th, .report td { border: 1px solid var(--border); padding: 5px 10px; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+  .metric { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .metric .num { font-size: 34px; font-weight: 700; }
+  .metric .lbl { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .loading { color: var(--muted); padding: 40px; text-align: center; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--panel2);
+    border: 1px solid var(--accent); padding: 14px 18px; border-radius: 8px; max-width: 360px; font-size: 14px; }
+  .prog { font-family: monospace; font-size: 13px; color: var(--muted); }
+  .prog b { color: var(--green); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+function colorScore(s) {
+  if (s == null) return "var(--muted)";
+  if (s >= 8) return "var(--green)";
+  if (s >= 5) return "var(--yellow)";
+  return "var(--red)";
+}
+function riesgoColor(r) {
+  return { "CRÍTICO": "#3a1d1d", "ALTO": "#3a2a1d", "MEDIO": "#33311d", "BAJO": "#12331f" }[r] || "var(--panel2)";
+}
+function riesgoText(r) {
+  return { "CRÍTICO": "#f85149", "ALTO": "#f0883e", "MEDIO": "#d29922", "BAJO": "#3fb950" }[r] || "var(--muted)";
+}
+
+function Badge({ score }) {
+  return <div className="score" style={{ color: colorScore(score) }}>
+    {score != null ? score : "—"}<small>/10</small>
+  </div>;
+}
+
+function Pill({ pr }) {
+  const cls = pr.merged ? "merged" : pr.estado;
+  const txt = pr.merged ? "fusionado" : (pr.estado === "open" ? "abierto" : "cerrado");
+  return <span className={"pill " + cls}>{txt}</span>;
+}
+
+function DiffView({ files }) {
+  if (!files || !files.length) return <p className="loading">Sin cambios de código en este PR.</p>;
+  return files.map((f, i) => (
+    <div key={i}>
+      <div className="filehead">{f.archivo}
+        <small>+{f.adiciones} −{f.eliminaciones}</small></div>
+      <div className="diff">
+        {(f.patch || "").split("\n").map((ln, j) => {
+          let cls = "ctx";
+          if (ln.startsWith("@@")) cls = "hunk";
+          else if (ln.startsWith("+")) cls = "add";
+          else if (ln.startsWith("-")) cls = "del";
+          return <div key={j} className={"line " + cls}>{ln || " "}</div>;
+        })}
+      </div>
+    </div>
+  ));
+}
+
+function Detalle({ num, onBack, toast }) {
+  const [pr, setPr] = useState(null);
+  const [files, setFiles] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const cargar = () => {
+    fetch(`/api/pulls/${num}`).then(r => r.json()).then(setPr);
+    fetch(`/api/pulls/${num}/diff`).then(r => r.json()).then(setFiles);
+  };
+  useEffect(cargar, [num]);
+
+  const accion = async (tipo) => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/pulls/${num}/${tipo}`, { method: "POST" });
+      const d = await r.json();
+      toast(d.error ? "⚠️ " + d.error : "✅ " + d.mensaje);
+      if (!d.error) setTimeout(cargar, 3000);
+    } catch (e) { toast("⚠️ " + e.message); }
+    setBusy(false);
+  };
+
+  if (!pr) return <div className="loading">Cargando…</div>;
+
+  return <div>
+    <span className="back" onClick={onBack}>← Volver al panel</span>
+    <div className="card">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div className="pr-title">#{pr.numero} · {pr.titulo} <Pill pr={pr} /></div>
+          <div className="pr-meta">rama <code>{pr.rama}</code> → <code>{pr.base}</code> · por {pr.autor}</div>
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <Badge score={pr.puntuacion} />
+          {pr.riesgo && <div className="badge" style={{ background: riesgoColor(pr.riesgo),
+            color: riesgoText(pr.riesgo), marginTop: 6 }}>{pr.riesgo}</div>}
+        </div>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <button className="btn btn-fix" disabled={busy} onClick={() => accion("fix-ia")}>
+          🤖 Corregir con IA</button>
+        <button className="btn btn-deploy" disabled={busy || (pr.puntuacion != null && pr.puntuacion < 8)}
+          onClick={() => accion("deploy")}>🚀 Desplegar</button>
+        <a className="btn btn-ghost" href={pr.url} target="_blank" style={{ textDecoration: "none" }}>Ver en GitHub</a>
+      </div>
+      {pr.puntuacion != null && pr.puntuacion < 8 &&
+        <p className="pr-meta" style={{ marginTop: 10 }}>El despliegue se habilita cuando la puntuación llega a 8.</p>}
+    </div>
+
+    <div className="filehead" style={{ fontSize: 15 }}>Cambios de código (diff)</div>
+    <DiffView files={files} />
+
+    {pr.reporte && <div>
+      <div className="filehead" style={{ fontSize: 15, marginTop: 20 }}>Reporte de análisis de IA</div>
+      <div className="report" dangerouslySetInnerHTML={{ __html: marked.parse(pr.reporte) }} />
+    </div>}
+  </div>;
+}
+
+function Panel({ onOpen }) {
+  const [pulls, setPulls] = useState(null);
+  useEffect(() => { fetch("/api/pulls").then(r => r.json()).then(setPulls); }, []);
+  if (!pulls) return <div className="loading">Cargando Pull Requests…</div>;
+  if (pulls.error) return <div className="loading">Error: {pulls.error}</div>;
+  if (!pulls.length) return <div className="loading">No hay Pull Requests todavía.</div>;
+  return pulls.map(pr => (
+    <div key={pr.numero} className="card pr-row" onClick={() => onOpen(pr.numero)}>
+      <div>
+        <div className="pr-title">#{pr.numero} · {pr.titulo} <Pill pr={pr} /></div>
+        <div className="pr-meta">rama <code>{pr.rama}</code> · por {pr.autor}</div>
+        {pr.progresion && <div className="prog" style={{ marginTop: 6 }}>
+          corrección IA: {pr.progresion.map((s, i) =>
+            <span key={i}>{i > 0 ? " → " : ""}{i === pr.progresion.length - 1 ? <b>{s}</b> : s}</span>)} /10</div>}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        {pr.riesgo && <span className="badge" style={{ background: riesgoColor(pr.riesgo),
+          color: riesgoText(pr.riesgo) }}>{pr.riesgo}</span>}
+        <Badge score={pr.puntuacion} />
+      </div>
+    </div>
+  ));
+}
+
+function Metricas() {
+  const [m, setM] = useState(null);
+  useEffect(() => { fetch("/api/metrics").then(r => r.json()).then(setM); }, []);
+  if (!m) return <div className="loading">Calculando métricas…</div>;
+  const items = [
+    { num: m.total_prs, lbl: "Pull Requests analizados" },
+    { num: m.correcciones_ia, lbl: "Correcciones con IA" },
+    { num: m.desplegados, lbl: "Despliegues realizados" },
+    { num: m.puntuacion_promedio, lbl: "Puntuación promedio /10" },
+    { num: "+" + m.mejora_promedio, lbl: "Mejora promedio por /fix-ia" },
+  ];
+  return <div className="metrics">
+    {items.map((it, i) => <div key={i} className="metric">
+      <div className="num" style={{ color: "var(--accent)" }}>{it.num}</div>
+      <div className="lbl">{it.lbl}</div>
+    </div>)}
+  </div>;
+}
+
+function App() {
+  const [vista, setVista] = useState("panel");
+  const [detalle, setDetalle] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const toast = (t) => { setMsg(t); setTimeout(() => setMsg(null), 6000); };
+
+  return <div>
+    <div className="header">
+      <div>
+        <h1>Panel de Control · Pipeline CI/CD con IA</h1>
+        <div className="sub">Validación y corrección de código con Llama 3 · Tesis Arce-Cerezo</div>
+      </div>
+      <div className="nav">
+        <button className={vista === "panel" && !detalle ? "active" : ""}
+          onClick={() => { setVista("panel"); setDetalle(null); }}>Panel</button>
+        <button className={vista === "metricas" ? "active" : ""}
+          onClick={() => { setVista("metricas"); setDetalle(null); }}>Métricas</button>
+      </div>
+    </div>
+    <div className="container">
+      {detalle ? <Detalle num={detalle} onBack={() => setDetalle(null)} toast={toast} />
+        : vista === "panel" ? <Panel onOpen={setDetalle} />
+        : <Metricas />}
+    </div>
+    {msg && <div className="toast">{msg}</div>}
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

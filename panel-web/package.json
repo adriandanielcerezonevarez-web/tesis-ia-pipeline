@@ -1,0 +1,13 @@
+{
+  "name": "panel-pipeline-ia",
+  "version": "1.0.0",
+  "description": "Panel de control del pipeline CI/CD con IA - Tesis Adrian Cerezo",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2"
+  }
+}
