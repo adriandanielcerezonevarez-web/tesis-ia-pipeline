@@ -1,5 +1,0 @@
-helpdesk-arce.duckdns.org {
-	root * /srv
-	file_server
-	encode gzip
-}
