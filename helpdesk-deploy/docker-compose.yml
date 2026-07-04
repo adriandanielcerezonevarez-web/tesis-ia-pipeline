@@ -11,6 +11,18 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+    depends_on:
+      - panel
+
+  panel:
+    build: ../panel-web
+    container_name: panel
+    restart: unless-stopped
+    environment:
+      - GITHUB_REPO=adriandanielcerezonevarez-web/tesis-ia-pipeline
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    expose:
+      - "3000"
 
 volumes:
   caddy_data:
