@@ -3,256 +3,325 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Panel de Control — Pipeline CI/CD con IA</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.2/marked.min.js"></script>
+<title>Validador de Código con IA</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --panel2: #1c2230; --border: #30363d;
-    --text: #e6edf3; --muted: #8b949e; --accent: #4c8bf5;
-    --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #a371f7;
+    --bg-base:#fafafa; --bg-surface:#fff; --bg-elevated:#f3f3f3; --bg-hover:#ececec;
+    --border:#d9d9d9; --accent:#1e3a8a; --accent-light:#2563eb; --accent-dim:#dbeafe;
+    --success:#2e7d32; --success-dim:#e3f3e4; --warning:#b76e00; --warning-dim:#fbf0d8;
+    --danger:#c62828; --danger-dim:#fadbdb; --info:#1565c0;
+    --text-primary:#222; --text-secondary:#555; --text-muted:#888;
+    --sidebar-w:230px; --topbar-h:60px; --radius:4px; --radius-lg:6px;
+    --shadow:0 1px 2px rgba(0,0,0,.08); --shadow-lg:0 2px 6px rgba(0,0,0,.12);
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
-  a { color: var(--accent); }
-  .header { background: var(--panel); border-bottom: 1px solid var(--border);
-    padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; }
-  .header h1 { font-size: 18px; margin: 0; font-weight: 600; }
-  .header .sub { color: var(--muted); font-size: 13px; }
-  .nav { display: flex; gap: 6px; }
-  .nav button { background: transparent; color: var(--muted); border: 1px solid transparent;
-    padding: 7px 14px; border-radius: 7px; cursor: pointer; font-size: 14px; }
-  .nav button.active { background: var(--panel2); color: var(--text); border-color: var(--border); }
-  .container { max-width: 1100px; margin: 0 auto; padding: 24px 28px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 18px 20px; margin-bottom: 14px; }
-  .pr-row { display: flex; align-items: center; justify-content: space-between; cursor: pointer;
-    transition: border-color .15s; }
-  .pr-row:hover { border-color: var(--accent); }
-  .pr-title { font-weight: 600; font-size: 15px; }
-  .pr-meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px;
-    font-weight: 600; }
-  .score { font-size: 26px; font-weight: 700; min-width: 90px; text-align: center; }
-  .score small { font-size: 13px; color: var(--muted); font-weight: 400; }
-  .pill { padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 6px; }
-  .pill.open { background: #12331f; color: var(--green); }
-  .pill.merged { background: #2b213f; color: var(--purple); }
-  .pill.closed { background: #3a1d1d; color: var(--red); }
-  .btn { border: none; padding: 9px 16px; border-radius: 7px; font-size: 14px; font-weight: 600;
-    cursor: pointer; margin-right: 8px; }
-  .btn-fix { background: var(--purple); color: #fff; }
-  .btn-deploy { background: var(--green); color: #06210e; }
-  .btn-ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
-  .btn:disabled { opacity: .5; cursor: not-allowed; }
-  .back { color: var(--muted); cursor: pointer; font-size: 14px; margin-bottom: 14px; display: inline-block; }
-  .diff { background: #0b0f14; border: 1px solid var(--border); border-radius: 8px; overflow-x: auto;
-    font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; margin-top: 8px; }
-  .diff .line { padding: 1px 12px; white-space: pre; }
-  .diff .add { background: rgba(63,185,80,.15); color: #7ee787; }
-  .diff .del { background: rgba(248,81,73,.15); color: #ffa198; }
-  .diff .hunk { background: rgba(76,139,245,.12); color: #79c0ff; }
-  .diff .ctx { color: var(--muted); }
-  .filehead { font-weight: 600; font-size: 13px; margin: 16px 0 4px; color: var(--text); }
-  .filehead small { color: var(--muted); font-weight: 400; margin-left: 8px; }
-  .report { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 4px 20px; margin-top: 14px; font-size: 14px; overflow-x: auto; }
-  .report table { border-collapse: collapse; }
-  .report th, .report td { border: 1px solid var(--border); padding: 5px 10px; }
-  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
-  .metric { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
-  .metric .num { font-size: 34px; font-weight: 700; }
-  .metric .lbl { color: var(--muted); font-size: 13px; margin-top: 4px; }
-  .loading { color: var(--muted); padding: 40px; text-align: center; }
-  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--panel2);
-    border: 1px solid var(--accent); padding: 14px 18px; border-radius: 8px; max-width: 360px; font-size: 14px; }
-  .prog { font-family: monospace; font-size: 13px; color: var(--muted); }
-  .prog b { color: var(--green); }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg-base);
+    color:var(--text-primary); min-height:100vh; display:flex; font-size:13px; line-height:1.5; }
+  .sidebar { width:var(--sidebar-w); background:var(--bg-surface); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; position:fixed; left:0; top:0; bottom:0; }
+  .sidebar-header { height:var(--topbar-h); display:flex; align-items:center; gap:10px; padding:0 18px;
+    border-bottom:1px solid var(--border); }
+  .logo-mark { width:30px; height:30px; border-radius:var(--radius); background:var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; }
+  .logo-text { font-weight:600; font-size:14px; }
+  .logo-text small { display:block; color:var(--text-muted); font-weight:400; font-size:11px; }
+  nav { padding:12px 10px; flex:1; }
+  .nav-item { display:flex; align-items:center; gap:10px; width:100%; padding:9px 12px; border:none;
+    background:transparent; color:var(--text-secondary); border-radius:var(--radius); cursor:pointer;
+    font-size:13px; text-align:left; margin-bottom:2px; }
+  .nav-item:hover { background:var(--bg-hover); }
+  .nav-item.active { background:var(--accent-dim); color:var(--accent); font-weight:600; }
+  .sidebar-footer { padding:14px 18px; border-top:1px solid var(--border); color:var(--text-muted); font-size:11px; }
+  main { margin-left:var(--sidebar-w); flex:1; min-height:100vh; }
+  .topbar { height:var(--topbar-h); background:var(--bg-surface); border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between; padding:0 24px; position:sticky; top:0; z-index:10; }
+  .topbar h1 { font-size:16px; font-weight:600; }
+  .topbar .estado { font-size:12px; color:var(--text-muted); }
+  .content { padding:24px; max-width:960px; }
+  .card { background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+    box-shadow:var(--shadow); padding:20px; margin-bottom:18px; }
+  .card h2 { font-size:15px; margin-bottom:4px; }
+  .card p.sub { color:var(--text-muted); margin-bottom:14px; }
+  .drop { border:2px dashed var(--border); border-radius:var(--radius-lg); padding:22px; text-align:center;
+    color:var(--text-muted); cursor:pointer; margin-bottom:12px; transition:.15s; }
+  .drop:hover, .drop.over { border-color:var(--accent-light); background:var(--accent-dim); color:var(--accent); }
+  textarea { width:100%; min-height:200px; border:1px solid var(--border); border-radius:var(--radius);
+    padding:12px; font-family:"SF Mono",Consolas,monospace; font-size:12.5px; resize:vertical; }
+  input[type=text] { border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px;
+    font-size:13px; width:260px; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  .btn { border:none; padding:10px 18px; border-radius:var(--radius); font-size:13px; font-weight:600;
+    cursor:pointer; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-primary:hover { background:var(--accent-light); }
+  .btn-ok { background:var(--success); color:#fff; }
+  .btn-warn { background:var(--warning); color:#fff; }
+  .btn-ghost { background:var(--bg-elevated); color:var(--text-primary); border:1px solid var(--border); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .score-box { display:flex; align-items:center; gap:20px; }
+  .score-num { font-size:48px; font-weight:800; line-height:1; }
+  .score-num small { font-size:16px; color:var(--text-muted); font-weight:400; }
+  .tag { display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; font-size:12.5px; }
+  th, td { border:1px solid var(--border); padding:6px 10px; text-align:left; }
+  th { background:var(--bg-elevated); }
+  ul.lista { margin:8px 0 0 18px; }
+  ul.lista li { margin-bottom:4px; }
+  .prog { font-family:monospace; font-size:14px; }
+  .prog b { color:var(--success); }
+  .oculto { display:none; }
+  .aviso { padding:10px 14px; border-radius:var(--radius); font-size:12.5px; margin-top:12px; }
+  .aviso.ok { background:var(--success-dim); color:var(--success); }
+  .aviso.warn { background:var(--warning-dim); color:var(--warning); }
+  pre.code { background:#0d1117; color:#e6edf3; border-radius:var(--radius); padding:14px; overflow-x:auto;
+    font-family:"SF Mono",Consolas,monospace; font-size:12px; margin-top:10px; max-height:340px; }
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center;
+    justify-content:center; z-index:100; }
+  .modal { background:#fff; border-radius:var(--radius-lg); padding:24px; max-width:420px; }
+  .modal h3 { margin-bottom:10px; }
+  .modal p { color:var(--text-secondary); margin-bottom:16px; }
+  .spin { color:var(--text-muted); padding:10px 0; }
 </style>
 </head>
 <body>
-<div id="root"></div>
-<script type="text/babel">
-const { useState, useEffect } = React;
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo-mark">IA</div>
+    <div class="logo-text">CodeGate IA<small>Validación CI/CD</small></div>
+  </div>
+  <nav>
+    <button class="nav-item active" onclick="ver('analizar')">Analizar código</button>
+    <button class="nav-item" onclick="ver('acerca')">Acerca de</button>
+  </nav>
+  <div class="sidebar-footer">Modelo Llama 3 (open source)<br/>Arce-Cerezo · Tesis</div>
+</aside>
 
-function colorScore(s) {
-  if (s == null) return "var(--muted)";
-  if (s >= 8) return "var(--green)";
-  if (s >= 5) return "var(--yellow)";
-  return "var(--red)";
-}
-function riesgoColor(r) {
-  return { "CRÍTICO": "#3a1d1d", "ALTO": "#3a2a1d", "MEDIO": "#33311d", "BAJO": "#12331f" }[r] || "var(--panel2)";
-}
-function riesgoText(r) {
-  return { "CRÍTICO": "#f85149", "ALTO": "#f0883e", "MEDIO": "#d29922", "BAJO": "#3fb950" }[r] || "var(--muted)";
-}
+<main>
+  <div class="topbar">
+    <h1 id="titulo">Analizar código</h1>
+    <div class="estado" id="estado">Listo</div>
+  </div>
+  <div class="content">
 
-function Badge({ score }) {
-  return <div className="score" style={{ color: colorScore(score) }}>
-    {score != null ? score : "—"}<small>/10</small>
-  </div>;
-}
-
-function Pill({ pr }) {
-  const cls = pr.merged ? "merged" : pr.estado;
-  const txt = pr.merged ? "fusionado" : (pr.estado === "open" ? "abierto" : "cerrado");
-  return <span className={"pill " + cls}>{txt}</span>;
-}
-
-function DiffView({ files }) {
-  if (!files || !files.length) return <p className="loading">Sin cambios de código en este PR.</p>;
-  return files.map((f, i) => (
-    <div key={i}>
-      <div className="filehead">{f.archivo}
-        <small>+{f.adiciones} −{f.eliminaciones}</small></div>
-      <div className="diff">
-        {(f.patch || "").split("\n").map((ln, j) => {
-          let cls = "ctx";
-          if (ln.startsWith("@@")) cls = "hunk";
-          else if (ln.startsWith("+")) cls = "add";
-          else if (ln.startsWith("-")) cls = "del";
-          return <div key={j} className={"line " + cls}>{ln || " "}</div>;
-        })}
-      </div>
-    </div>
-  ));
-}
-
-function Detalle({ num, onBack, toast }) {
-  const [pr, setPr] = useState(null);
-  const [files, setFiles] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  const cargar = () => {
-    fetch(`/api/pulls/${num}`).then(r => r.json()).then(setPr);
-    fetch(`/api/pulls/${num}/diff`).then(r => r.json()).then(setFiles);
-  };
-  useEffect(cargar, [num]);
-
-  const accion = async (tipo) => {
-    setBusy(true);
-    try {
-      const r = await fetch(`/api/pulls/${num}/${tipo}`, { method: "POST" });
-      const d = await r.json();
-      toast(d.error ? "⚠️ " + d.error : "✅ " + d.mensaje);
-      if (!d.error) setTimeout(cargar, 3000);
-    } catch (e) { toast("⚠️ " + e.message); }
-    setBusy(false);
-  };
-
-  if (!pr) return <div className="loading">Cargando…</div>;
-
-  return <div>
-    <span className="back" onClick={onBack}>← Volver al panel</span>
-    <div className="card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div className="pr-title">#{pr.numero} · {pr.titulo} <Pill pr={pr} /></div>
-          <div className="pr-meta">rama <code>{pr.rama}</code> → <code>{pr.base}</code> · por {pr.autor}</div>
-        </div>
-        <div style={{ textAlign: "center" }}>
-          <Badge score={pr.puntuacion} />
-          {pr.riesgo && <div className="badge" style={{ background: riesgoColor(pr.riesgo),
-            color: riesgoText(pr.riesgo), marginTop: 6 }}>{pr.riesgo}</div>}
+    <!-- SECCIÓN ANALIZAR -->
+    <div id="sec-analizar">
+      <div class="card">
+        <h2>Sube o pega tu código</h2>
+        <p class="sub">La IA valida la calidad, te da un reporte y decide si es apto para desplegar.</p>
+        <div class="drop" id="drop">Arrastra un archivo aquí o haz clic para elegirlo</div>
+        <input type="file" id="file" class="oculto" />
+        <textarea id="codigo" placeholder="…o pega tu código aquí"></textarea>
+        <div class="row">
+          <input type="text" id="nombre" placeholder="nombre del archivo (ej. main.py)" />
+          <button class="btn btn-primary" id="btnAnalizar" onclick="analizar()">Analizar código</button>
         </div>
       </div>
-      <div style={{ marginTop: 16 }}>
-        <button className="btn btn-fix" disabled={busy} onClick={() => accion("fix-ia")}>
-          🤖 Corregir con IA</button>
-        <button className="btn btn-deploy" disabled={busy || (pr.puntuacion != null && pr.puntuacion < 8)}
-          onClick={() => accion("deploy")}>🚀 Desplegar</button>
-        <a className="btn btn-ghost" href={pr.url} target="_blank" style={{ textDecoration: "none" }}>Ver en GitHub</a>
-      </div>
-      {pr.puntuacion != null && pr.puntuacion < 8 &&
-        <p className="pr-meta" style={{ marginTop: 10 }}>El despliegue se habilita cuando la puntuación llega a 8.</p>}
+
+      <!-- RESULTADO -->
+      <div id="resultado"></div>
     </div>
 
-    <div className="filehead" style={{ fontSize: 15 }}>Cambios de código (diff)</div>
-    <DiffView files={files} />
+    <!-- SECCIÓN ACERCA -->
+    <div id="sec-acerca" class="oculto">
+      <div class="card">
+        <h2>Acerca de CodeGate IA</h2>
+        <p class="sub">Aplicación de validación y corrección de código con Inteligencia Artificial.</p>
+        <p>El usuario sube su código y la app aplica un proceso CI/CD con IA: analiza la calidad en 7 dimensiones,
+        entrega un reporte descargable en PDF, y según la puntuación permite desplegar automáticamente
+        (integrándose al sistema del usuario) o corregir el código —manualmente o con la IA— hasta que sea apto.</p>
+        <p style="margin-top:10px">Modelo: <b>Llama 3.3 70B</b> (open source). Independiente de cualquier plataforma.</p>
+      </div>
+    </div>
 
-    {pr.reporte && <div>
-      <div className="filehead" style={{ fontSize: 15, marginTop: 20 }}>Reporte de análisis de IA</div>
-      <div className="report" dangerouslySetInnerHTML={{ __html: marked.parse(pr.reporte) }} />
-    </div>}
-  </div>;
+  </div>
+</main>
+
+<div id="modal"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let codigoActual = "";
+let nombreActual = "";
+
+function ver(sec) {
+  $("sec-analizar").classList.toggle("oculto", sec !== "analizar");
+  $("sec-acerca").classList.toggle("oculto", sec !== "acerca");
+  $("titulo").textContent = sec === "analizar" ? "Analizar código" : "Acerca de";
+  document.querySelectorAll(".nav-item").forEach((b, i) =>
+    b.classList.toggle("active", (sec === "analizar") === (i === 0)));
 }
 
-function Panel({ onOpen }) {
-  const [pulls, setPulls] = useState(null);
-  useEffect(() => { fetch("/api/pulls").then(r => r.json()).then(setPulls); }, []);
-  if (!pulls) return <div className="loading">Cargando Pull Requests…</div>;
-  if (pulls.error) return <div className="loading">Error: {pulls.error}</div>;
-  if (!pulls.length) return <div className="loading">No hay Pull Requests todavía.</div>;
-  return pulls.map(pr => (
-    <div key={pr.numero} className="card pr-row" onClick={() => onOpen(pr.numero)}>
+// Subida de archivo
+$("drop").onclick = () => $("file").click();
+$("file").onchange = (e) => leerArchivo(e.target.files[0]);
+$("drop").ondragover = (e) => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = (e) => { e.preventDefault(); $("drop").classList.remove("over"); leerArchivo(e.dataTransfer.files[0]); };
+function leerArchivo(f) {
+  if (!f) return;
+  $("nombre").value = f.name;
+  const r = new FileReader();
+  r.onload = () => { $("codigo").value = r.result; };
+  r.readAsText(f);
+}
+
+function colorScore(s) { return s >= 8 ? "var(--success)" : s >= 5 ? "var(--warning)" : "var(--danger)"; }
+function tagRiesgo(r) {
+  const m = { "CRÍTICO":["#fadbdb","#c62828"], "ALTO":["#fbe4d8","#b45309"],
+    "MEDIO":["#fbf0d8","#b76e00"], "BAJO":["#e3f3e4","#2e7d32"] }[r] || ["#eee","#555"];
+  return `<span class="tag" style="background:${m[0]};color:${m[1]}">${r}</span>`;
+}
+
+async function post(url, body) {
+  const r = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  return r.json();
+}
+
+async function analizar() {
+  codigoActual = $("codigo").value;
+  nombreActual = $("nombre").value || "codigo.txt";
+  if (!codigoActual.trim()) { alert("Sube o pega código primero."); return; }
+  $("btnAnalizar").disabled = true;
+  $("estado").textContent = "Analizando con IA…";
+  $("resultado").innerHTML = '<div class="card spin">La IA está analizando el código…</div>';
+  try {
+    const d = await post("/api/analizar", { codigo:codigoActual, nombre:nombreActual });
+    if (!d.ok) throw new Error(d.error);
+    renderReporte(d.analisis, false);
+  } catch (e) {
+    $("resultado").innerHTML = `<div class="card aviso warn">Error: ${e.message}</div>`;
+  }
+  $("btnAnalizar").disabled = false;
+  $("estado").textContent = "Listo";
+}
+
+function renderReporte(a, corregido, progresion) {
+  const s = a.puntuacion_calidad;
+  const apto = s >= 8;
+  let dims = (a.dimensiones || []).map(d =>
+    `<tr><td>${d.nombre}</td><td>${d.puntuacion}/10</td><td>${d.estado}</td></tr>`).join("");
+  let probs = (a.problemas_criticos || []).map(p => `<li>${p}</li>`).join("");
+  let recs = (a.recomendaciones_prioritarias || []).map(r => `<li>${r}</li>`).join("");
+
+  let progHtml = "";
+  if (progresion && progresion.length) {
+    progHtml = `<div class="prog" style="margin-bottom:10px">Corrección IA: ` +
+      progresion.map((x,i)=> (i? " → ":"") + (i===progresion.length-1? `<b>${x}</b>`:x)).join("") + ` /10</div>`;
+  }
+
+  let acciones = "";
+  if (apto) {
+    acciones = `<div class="aviso ok">Código apto (≥ 8). Puede desplegarse automáticamente.</div>
+      <div class="row"><button class="btn btn-ok" onclick="pedirDespliegue()">Desplegar automáticamente</button>
+      <button class="btn btn-ghost" onclick="descargarPDF()">Descargar reporte PDF</button></div>`;
+  } else {
+    acciones = `<div class="aviso warn">Código no apto (&lt; 8). Elige cómo corregirlo:</div>
+      <div class="row">
+        <button class="btn btn-warn" onclick="corregirManual()">Lo corrijo yo</button>
+        <button class="btn btn-primary" onclick="corregirIA()">Que lo corrija la IA</button>
+        <button class="btn btn-ghost" onclick="descargarPDF()">Descargar reporte PDF</button>
+      </div>`;
+  }
+
+  const codeBlock = corregido ?
+    `<h2 style="margin-top:18px">Código corregido por la IA</h2>
+     <pre class="code" id="codeCorr">${escapar(codigoActual)}</pre>
+     <div class="row"><button class="btn btn-ghost" onclick="descargarCodigo()">Descargar código corregido</button></div>` : "";
+
+  $("resultado").innerHTML = `<div class="card">
+    ${progHtml}
+    <div class="score-box">
+      <div class="score-num" style="color:${colorScore(s)}">${s}<small>/10</small></div>
       <div>
-        <div className="pr-title">#{pr.numero} · {pr.titulo} <Pill pr={pr} /></div>
-        <div className="pr-meta">rama <code>{pr.rama}</code> · por {pr.autor}</div>
-        {pr.progresion && <div className="prog" style={{ marginTop: 6 }}>
-          corrección IA: {pr.progresion.map((s, i) =>
-            <span key={i}>{i > 0 ? " → " : ""}{i === pr.progresion.length - 1 ? <b>{s}</b> : s}</span>)} /10</div>}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        {pr.riesgo && <span className="badge" style={{ background: riesgoColor(pr.riesgo),
-          color: riesgoText(pr.riesgo) }}>{pr.riesgo}</span>}
-        <Badge score={pr.puntuacion} />
+        <div style="margin-bottom:6px">${tagRiesgo(a.nivel_riesgo)}</div>
+        <div style="color:var(--text-secondary)">${a.resumen_general || ""}</div>
       </div>
     </div>
-  ));
+    ${acciones}
+    ${probs ? `<h2 style="margin-top:18px">Problemas críticos</h2><ul class="lista">${probs}</ul>` : ""}
+    ${recs ? `<h2 style="margin-top:14px">Recomendaciones prioritarias</h2><ul class="lista">${recs}</ul>` : ""}
+    <h2 style="margin-top:16px">Análisis por dimensión</h2>
+    <table><tr><th>Dimensión</th><th>Puntuación</th><th>Estado</th></tr>${dims}</table>
+    ${codeBlock}
+  </div>`;
+  window._ultimoAnalisis = a;
 }
 
-function Metricas() {
-  const [m, setM] = useState(null);
-  useEffect(() => { fetch("/api/metrics").then(r => r.json()).then(setM); }, []);
-  if (!m) return <div className="loading">Calculando métricas…</div>;
-  const items = [
-    { num: m.total_prs, lbl: "Pull Requests analizados" },
-    { num: m.correcciones_ia, lbl: "Correcciones con IA" },
-    { num: m.desplegados, lbl: "Despliegues realizados" },
-    { num: m.puntuacion_promedio, lbl: "Puntuación promedio /10" },
-    { num: "+" + m.mejora_promedio, lbl: "Mejora promedio por /fix-ia" },
-  ];
-  return <div className="metrics">
-    {items.map((it, i) => <div key={i} className="metric">
-      <div className="num" style={{ color: "var(--accent)" }}>{it.num}</div>
-      <div className="lbl">{it.lbl}</div>
-    </div>)}
-  </div>;
+function escapar(t) { return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+async function corregirIA() {
+  $("estado").textContent = "Corrigiendo con IA…";
+  $("resultado").innerHTML = '<div class="card spin">La IA está corrigiendo el código (puede tardar)…</div>';
+  try {
+    const d = await post("/api/corregir", { codigo:codigoActual, nombre:nombreActual });
+    if (!d.ok) throw new Error(d.error);
+    codigoActual = d.codigo_corregido;
+    renderReporte(d.analisis, true, d.progresion);
+    if (d.apto) $("estado").textContent = "Corregido y apto";
+    else $("estado").textContent = "No alcanzó 8 en los intentos";
+  } catch (e) {
+    $("resultado").innerHTML = `<div class="card aviso warn">Error: ${e.message}</div>`;
+  }
 }
 
-function App() {
-  const [vista, setVista] = useState("panel");
-  const [detalle, setDetalle] = useState(null);
-  const [msg, setMsg] = useState(null);
-  const toast = (t) => { setMsg(t); setTimeout(() => setMsg(null), 6000); };
-
-  return <div>
-    <div className="header">
-      <div>
-        <h1>Panel de Control · Pipeline CI/CD con IA</h1>
-        <div className="sub">Validación y corrección de código con Llama 3 · Tesis Arce-Cerezo</div>
-      </div>
-      <div className="nav">
-        <button className={vista === "panel" && !detalle ? "active" : ""}
-          onClick={() => { setVista("panel"); setDetalle(null); }}>Panel</button>
-        <button className={vista === "metricas" ? "active" : ""}
-          onClick={() => { setVista("metricas"); setDetalle(null); }}>Métricas</button>
-      </div>
-    </div>
-    <div className="container">
-      {detalle ? <Detalle num={detalle} onBack={() => setDetalle(null)} toast={toast} />
-        : vista === "panel" ? <Panel onOpen={setDetalle} />
-        : <Metricas />}
-    </div>
-    {msg && <div className="toast">{msg}</div>}
-  </div>;
+function corregirManual() {
+  const a = window._ultimoAnalisis || {};
+  const recs = (a.recomendaciones_prioritarias || []).map(r => `<li>${r}</li>`).join("");
+  $("resultado").insertAdjacentHTML("beforeend",
+    `<div class="card"><h2>Corrección manual</h2>
+     <p class="sub">Aplica estos cambios en tu código y vuelve a subirlo para re-analizar.</p>
+     <ul class="lista">${recs}</ul></div>`);
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+function pedirDespliegue() {
+  $("modal").innerHTML = `<div class="modal-bg"><div class="modal">
+    <h3>Permiso de integración</h3>
+    <p>La aplicación necesita permiso para integrarse a tu sistema y desplegar el código aprobado.
+    ¿Autorizas la integración?</p>
+    <div class="row">
+      <button class="btn btn-ok" onclick="confirmarDespliegue()">Autorizar y desplegar</button>
+      <button class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
+    </div></div></div>`;
+}
+function cerrarModal() { $("modal").innerHTML = ""; }
+async function confirmarDespliegue() {
+  cerrarModal();
+  $("estado").textContent = "Desplegando…";
+  const d = await post("/api/desplegar", { destino:"producción" });
+  $("resultado").insertAdjacentHTML("beforeend",
+    `<div class="card aviso ok">${d.mensaje || "Desplegado."}</div>`);
+  $("estado").textContent = "Desplegado";
+}
+
+function descargarPDF() {
+  const a = window._ultimoAnalisis; if (!a) return;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y = 18;
+  doc.setFontSize(16); doc.text("Reporte de Calidad de Código - IA", 14, y); y += 8;
+  doc.setFontSize(10); doc.setTextColor(120);
+  doc.text("Archivo: " + nombreActual + "  |  Modelo: Llama 3.3 70B", 14, y); y += 10;
+  doc.setTextColor(30); doc.setFontSize(13);
+  doc.text("Puntuacion: " + a.puntuacion_calidad + "/10   Riesgo: " + a.nivel_riesgo, 14, y); y += 8;
+  doc.setFontSize(10);
+  const resumen = doc.splitTextToSize("Resumen: " + (a.resumen_general||""), 180);
+  doc.text(resumen, 14, y); y += resumen.length*5 + 4;
+  doc.setFontSize(12); doc.text("Dimensiones:", 14, y); y += 6; doc.setFontSize(10);
+  (a.dimensiones||[]).forEach(d => { doc.text(`- ${d.nombre}: ${d.puntuacion}/10 (${d.estado})`, 16, y); y += 5;
+    if (y > 275) { doc.addPage(); y = 18; } });
+  y += 3; doc.setFontSize(12); doc.text("Recomendaciones:", 14, y); y += 6; doc.setFontSize(10);
+  (a.recomendaciones_prioritarias||[]).forEach(r => {
+    const l = doc.splitTextToSize("- " + r, 180); doc.text(l, 16, y); y += l.length*5;
+    if (y > 275) { doc.addPage(); y = 18; } });
+  doc.save("reporte-calidad-" + nombreActual + ".pdf");
+}
+
+function descargarCodigo() {
+  const blob = new Blob([codigoActual], { type:"text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "corregido-" + nombreActual; a.click();
+}
 </script>
 </body>
 </html>
