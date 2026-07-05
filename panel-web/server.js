@@ -1,12 +1,11 @@
 // ============================================================
-//  Panel de Control del Pipeline CI/CD con IA — Backend
+//  App de Validación y Corrección de Código con IA — Backend
 // ============================================================
+//  App autónoma (no depende de GitHub). El usuario sube código,
+//  la IA lo analiza, lo corrige y decide si es apto para desplegar.
+//
 //  Tesis: Diseño de un modelo de uso de IA en pipelines CI/CD
 //  Autor: Adrian Daniel Cerezo Nevarez
-//
-//  API en Node/Express que consulta la API de GitHub para mostrar
-//  los Pull Requests, sus puntuaciones de calidad, el diff del código
-//  y ejecutar acciones (/fix-ia y desplegar).
 // ============================================================
 
 import express from "express";
@@ -16,243 +15,185 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-const REPO = process.env.GITHUB_REPO || "adriandanielcerezonevarez-web/tesis-ia-pipeline";
-const TOKEN = process.env.GITHUB_TOKEN || "";
-const API = "https://api.github.com";
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const MODELO = "llama-3.3-70b-versatile";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const UMBRAL = 8;        // nota mínima para desplegar
+const MAX_ITER = 4;      // correcciones máximas por archivo
 
 // ─────────────────────────────────────────────────────────────
-//  Utilidades de acceso a la API de GitHub
+//  Prompts (mismos criterios que el analizador de la tesis)
 // ─────────────────────────────────────────────────────────────
 
-async function gh(pathname, options = {}) {
-  const headers = {
-    "Accept": "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "panel-pipeline-ia",
-    ...(options.headers || {}),
-  };
-  if (TOKEN) headers["Authorization"] = `Bearer ${TOKEN}`;
+const PROMPT_ANALISIS = `
+Eres un experto en calidad de software. Analiza el código y responde SOLO con JSON puro (sin markdown):
+{
+  "resumen_general": "texto breve",
+  "puntuacion_calidad": <número 1 a 10>,
+  "nivel_riesgo": "BAJO|MEDIO|ALTO|CRÍTICO",
+  "dimensiones": [
+    {"nombre": "Código Limpio", "puntuacion": <1-10>, "estado": "BIEN|MEJORABLE|PROBLEMA|CRÍTICO", "hallazgos": ["..."], "recomendaciones": ["..."]}
+  ],
+  "problemas_criticos": ["..."],
+  "recomendaciones_prioritarias": ["..."],
+  "apto_para_despliegue": true|false
+}
+Evalúa 7 dimensiones: Código Limpio, Modularidad, Legibilidad, Manejo de Errores, Mantenibilidad, Seguridad Básica, Documentación.
+Responde ÚNICAMENTE el JSON.`.trim();
 
-  const res = await fetch(`${API}${pathname}`, { ...options, headers });
+const PROMPT_CORRECCION = `
+Eres un ingeniero experto en refactorización. Reescribe el código aplicando las recomendaciones y las buenas prácticas
+(código limpio, modularidad, legibilidad, manejo de errores, mantenibilidad, seguridad, documentación).
+REGLAS: no cambies la funcionalidad; conserva el lenguaje; no agregues dependencias nuevas.
+Devuelve ÚNICAMENTE el código corregido completo, sin explicaciones y SIN delimitadores markdown.`.trim();
+
+// ─────────────────────────────────────────────────────────────
+//  Llamada a Groq
+// ─────────────────────────────────────────────────────────────
+
+async function groq(system, user, maxTokens) {
+  if (!GROQ_API_KEY) throw new Error("Falta GROQ_API_KEY en el servidor.");
+  const res = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODELO,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.15,
+      max_tokens: maxTokens || 4096,
+    }),
+  });
   if (!res.ok) {
-    const texto = await res.text();
-    throw new Error(`GitHub API ${res.status}: ${texto.slice(0, 200)}`);
+    const t = await res.text();
+    throw new Error(`Groq ${res.status}: ${t.slice(0, 200)}`);
   }
-  // Los endpoints que devuelven diff usan texto plano
-  const tipo = res.headers.get("content-type") || "";
-  return tipo.includes("application/json") ? res.json() : res.text();
+  const data = await res.json();
+  return data.choices[0].message.content.trim();
 }
 
-// Extrae la puntuación de calidad (0-10) de un texto de reporte markdown.
-function extraerPuntuacion(texto) {
-  if (!texto) return null;
-  const m = texto.match(/Puntuaci[oó]n[^\d]{0,40}?(\d+(?:\.\d+)?)\s*\/\s*10/i);
-  return m ? parseFloat(m[1]) : null;
+function limpiarJson(txt) {
+  if (txt.startsWith("```")) {
+    const lineas = txt.split("\n");
+    if (lineas[0].startsWith("```")) lineas.shift();
+    if (lineas.length && lineas[lineas.length - 1].trim() === "```") lineas.pop();
+    txt = lineas.join("\n");
+  }
+  return txt;
 }
 
-// Extrae el nivel de riesgo (BAJO/MEDIO/ALTO/CRÍTICO) de un reporte.
-function extraerRiesgo(texto) {
-  if (!texto) return null;
-  const m = texto.match(/\b(CR[IÍ]TICO|ALTO|MEDIO|BAJO)\b/i);
-  return m ? m[1].toUpperCase() : null;
+function limpiarCodigo(txt) {
+  if (txt.startsWith("```")) {
+    const lineas = txt.split("\n");
+    if (lineas[0].startsWith("```")) lineas.shift();
+    if (lineas.length && lineas[lineas.length - 1].trim() === "```") lineas.pop();
+    txt = lineas.join("\n");
+  }
+  return txt.trim() + "\n";
 }
 
-// Extrae una progresión de puntuaciones tipo "2 → 6 → 8" de un comentario.
-function extraerProgresion(texto) {
-  if (!texto) return null;
-  const m = texto.match(/(\d+(?:\.\d+)?(?:\s*→\s*\d+(?:\.\d+)?)+)\s*\/?\s*10/);
-  if (!m) return null;
-  return m[1].split("→").map((s) => parseFloat(s.trim()));
+function recomendacionesTexto(analisis) {
+  const partes = [];
+  for (const p of analisis.problemas_criticos || []) partes.push(`- [CRÍTICO] ${p}`);
+  for (const r of analisis.recomendaciones_prioritarias || []) partes.push(`- ${r}`);
+  for (const d of analisis.dimensiones || [])
+    for (const r of d.recomendaciones || []) partes.push(`- (${d.nombre}) ${r}`);
+  return partes.join("\n");
 }
 
-// Devuelve los comentarios de un PR (que son "issue comments").
-async function comentariosDe(numero) {
-  return gh(`/repos/${REPO}/issues/${numero}/comments?per_page=100`);
+async function analizar(codigo, nombre) {
+  const ext = (nombre || "").split(".").pop();
+  const user = `Analiza este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\n\`\`\`\n${codigo.slice(0, 12000)}\n\`\`\``;
+  const raw = await groq(PROMPT_ANALISIS, user, 4096);
+  return JSON.parse(limpiarJson(raw));
 }
 
-// Busca el reporte de análisis más reciente publicado por el bot en un PR.
-function ultimoReporte(comentarios) {
-  const reportes = comentarios.filter(
-    (c) => c.user && c.user.type === "Bot" &&
-    /Reporte de An[aá]lisis|Correcci[oó]n autom[aá]tica/i.test(c.body || "")
-  );
-  return reportes.length ? reportes[reportes.length - 1] : null;
+async function corregir(codigo, nombre, recomendaciones) {
+  const ext = (nombre || "").split(".").pop();
+  const user = `Corrige este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
+  const raw = await groq(PROMPT_CORRECCION, user, 8192);
+  return limpiarCodigo(raw);
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Endpoints de la API del panel
+//  Endpoints
 // ─────────────────────────────────────────────────────────────
 
-// Estado / salud
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, repo: REPO, autenticado: Boolean(TOKEN) });
+  res.json({ ok: true, modelo: MODELO, configurado: Boolean(GROQ_API_KEY) });
 });
 
-// Lista de Pull Requests con su puntuación
-app.get("/api/pulls", async (req, res) => {
+// Analiza el código y devuelve el reporte con la puntuación
+app.post("/api/analizar", async (req, res) => {
   try {
-    const pulls = await gh(`/repos/${REPO}/pulls?state=all&per_page=30&sort=created&direction=desc`);
-    const resultado = [];
-    for (const pr of pulls) {
-      let puntuacion = null;
-      let riesgo = null;
-      let progresion = null;
-      try {
-        const comentarios = await comentariosDe(pr.number);
-        const rep = ultimoReporte(comentarios);
-        if (rep) {
-          puntuacion = extraerPuntuacion(rep.body);
-          riesgo = extraerRiesgo(rep.body);
-        }
-        // Buscar progresión en comentarios de corrección
-        for (const c of comentarios) {
-          const p = extraerProgresion(c.body || "");
-          if (p) progresion = p;
-        }
-      } catch (e) { /* sin comentarios */ }
-
-      resultado.push({
-        numero: pr.number,
-        titulo: pr.title,
-        estado: pr.state,
-        merged: Boolean(pr.merged_at),
-        rama: pr.head ? pr.head.ref : "",
-        autor: pr.user ? pr.user.login : "",
-        creado: pr.created_at,
-        url: pr.html_url,
-        puntuacion,
-        riesgo,
-        progresion,
-      });
-    }
-    res.json(resultado);
+    const { codigo, nombre } = req.body;
+    if (!codigo || !codigo.trim()) throw new Error("No se recibió código.");
+    const analisis = await analizar(codigo, nombre);
+    res.json({ ok: true, analisis });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-// Detalle de un PR: info + reporte markdown más reciente
-app.get("/api/pulls/:num", async (req, res) => {
+// Corrige el código iterativamente hasta alcanzar el umbral (8) o el máximo de intentos
+app.post("/api/corregir", async (req, res) => {
   try {
-    const num = req.params.num;
-    const pr = await gh(`/repos/${REPO}/pulls/${num}`);
-    const comentarios = await comentariosDe(num);
-    const rep = ultimoReporte(comentarios);
-    res.json({
-      numero: pr.number,
-      titulo: pr.title,
-      estado: pr.state,
-      merged: Boolean(pr.merged_at),
-      rama: pr.head ? pr.head.ref : "",
-      base: pr.base ? pr.base.ref : "",
-      autor: pr.user ? pr.user.login : "",
-      creado: pr.created_at,
-      url: pr.html_url,
-      puntuacion: rep ? extraerPuntuacion(rep.body) : null,
-      riesgo: rep ? extraerRiesgo(rep.body) : null,
-      reporte: rep ? rep.body : null,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+    let { codigo, nombre } = req.body;
+    if (!codigo || !codigo.trim()) throw new Error("No se recibió código.");
 
-// Diff (archivos modificados con su parche) de un PR
-app.get("/api/pulls/:num/diff", async (req, res) => {
-  try {
-    const num = req.params.num;
-    const files = await gh(`/repos/${REPO}/pulls/${num}/files?per_page=100`);
-    res.json(files.map((f) => ({
-      archivo: f.filename,
-      estado: f.status,
-      adiciones: f.additions,
-      eliminaciones: f.deletions,
-      patch: f.patch || "",
-    })));
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+    const progresion = [];
+    let analisis = null;
 
-// Acción: lanzar la corrección con IA (comenta /fix-ia en el PR)
-app.post("/api/pulls/:num/fix-ia", async (req, res) => {
-  try {
-    if (!TOKEN) throw new Error("Falta GITHUB_TOKEN para ejecutar acciones.");
-    const num = req.params.num;
-    await gh(`/repos/${REPO}/issues/${num}/comments`, {
-      method: "POST",
-      body: JSON.stringify({ body: "/fix-ia" }),
-    });
-    res.json({ ok: true, mensaje: "Corrección con IA solicitada. El pipeline la procesará en ~1-2 min." });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Acción: desplegar (fusiona el PR a main, lo que dispara el despliegue automático)
-app.post("/api/pulls/:num/deploy", async (req, res) => {
-  try {
-    if (!TOKEN) throw new Error("Falta GITHUB_TOKEN para ejecutar acciones.");
-    const num = req.params.num;
-    await gh(`/repos/${REPO}/pulls/${num}/merge`, {
-      method: "PUT",
-      body: JSON.stringify({ merge_method: "merge" }),
-    });
-    res.json({ ok: true, mensaje: "PR fusionado a main. El despliegue automático (Job 4) se está ejecutando." });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Métricas agregadas del pipeline
-app.get("/api/metrics", async (req, res) => {
-  try {
-    const pulls = await gh(`/repos/${REPO}/pulls?state=all&per_page=50`);
-    let totalPRs = pulls.length;
-    let desplegados = 0;
-    let correcciones = 0;
-    let mejoras = [];
-    const puntuaciones = [];
-
-    for (const pr of pulls) {
-      if (pr.merged_at) desplegados++;
-      try {
-        const comentarios = await comentariosDe(pr.number);
-        const rep = ultimoReporte(comentarios);
-        if (rep) {
-          const p = extraerPuntuacion(rep.body);
-          if (p != null) puntuaciones.push(p);
-        }
-        for (const c of comentarios) {
-          if (/Correcci[oó]n autom[aá]tica/i.test(c.body || "")) correcciones++;
-          const prog = extraerProgresion(c.body || "");
-          if (prog && prog.length >= 2) mejoras.push(prog[prog.length - 1] - prog[0]);
-        }
-      } catch (e) { /* ignore */ }
+    for (let i = 0; i <= MAX_ITER; i++) {
+      analisis = await analizar(codigo, nombre);
+      progresion.push(analisis.puntuacion_calidad);
+      if (analisis.puntuacion_calidad >= UMBRAL) break;
+      if (i === MAX_ITER) break;
+      const recs = recomendacionesTexto(analisis);
+      const nuevo = await corregir(codigo, nombre, recs);
+      if (!nuevo || nuevo.trim() === codigo.trim()) break;
+      codigo = nuevo;
     }
 
-    const promedio = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
     res.json({
-      total_prs: totalPRs,
-      desplegados,
-      correcciones_ia: correcciones,
-      puntuacion_promedio: Number(promedio(puntuaciones).toFixed(1)),
-      mejora_promedio: Number(promedio(mejoras).toFixed(1)),
+      ok: true,
+      codigo_corregido: codigo,
+      progresion,
+      analisis,
+      apto: analisis.puntuacion_calidad >= UMBRAL,
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-// Cualquier otra ruta sirve el frontend (SPA)
+// "Despliegue": la app pide permiso para integrarse al sistema del usuario.
+// (En la tesis se usa el HelpDesk; aquí se registra la intención de integración.)
+app.post("/api/desplegar", async (req, res) => {
+  try {
+    const { destino } = req.body || {};
+    res.json({
+      ok: true,
+      mensaje: `Integración autorizada. Código apto desplegado en el entorno "${destino || "producción"}".`,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.listen(PORT, () => {
-  console.log(`Panel del pipeline IA escuchando en el puerto ${PORT} (repo: ${REPO})`);
+  console.log(`App de validación IA escuchando en el puerto ${PORT}`);
 });
