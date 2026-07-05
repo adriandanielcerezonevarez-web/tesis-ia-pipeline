@@ -19,8 +19,7 @@ services:
     container_name: panel
     restart: unless-stopped
     environment:
-      - GITHUB_REPO=adriandanielcerezonevarez-web/tesis-ia-pipeline
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
     expose:
       - "3000"
 
