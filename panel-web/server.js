@@ -2,13 +2,15 @@
 //  App de Validación y Corrección de Código con IA — Backend
 // ============================================================
 //  App autónoma (no depende de GitHub). El usuario sube código,
-//  la IA lo analiza, lo corrige y decide si es apto para desplegar.
+//  la IA lo analiza, lo corrige y, si es apto (>= 8), lo despliega
+//  automáticamente al HelpDesk (integración con el sistema).
 //
 //  Tesis: Diseño de un modelo de uso de IA en pipelines CI/CD
 //  Autor: Adrian Daniel Cerezo Nevarez
 // ============================================================
 
 import express from "express";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -22,40 +24,61 @@ const PORT = process.env.PORT || 3000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const MODELO = "llama-3.3-70b-versatile";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const UMBRAL = 8;        // nota mínima para desplegar
-const MAX_ITER = 4;      // correcciones máximas por archivo
+const UMBRAL = 8;                                    // nota mínima para desplegar
+const MAX_ITER = 4;                                  // correcciones máximas
+const HELPDESK_DIR = process.env.HELPDESK_DIR || "/helpdesk";  // carpeta del HelpDesk (volumen)
+const HELPDESK_URL = "https://helpdesk-arce.duckdns.org";
 
 // ─────────────────────────────────────────────────────────────
-//  Prompts (mismos criterios que el analizador de la tesis)
+//  Prompts con rúbrica fija (para puntuaciones consistentes)
 // ─────────────────────────────────────────────────────────────
 
 const PROMPT_ANALISIS = `
-Eres un experto en calidad de software. Analiza el código y responde SOLO con JSON puro (sin markdown):
+Eres un revisor experto de calidad de software. Analiza el código con RIGOR y CONSISTENCIA.
+
+Puntúa cada una de las 7 dimensiones de 1 a 10 con esta rúbrica:
+- 9-10: excelente, sin problemas.
+- 7-8: bueno, solo mejoras menores.
+- 5-6: aceptable, varios problemas.
+- 3-4: deficiente, problemas serios.
+- 1-2: crítico, muy malo.
+
+Las 7 dimensiones son EXACTAMENTE:
+Código Limpio, Modularidad, Legibilidad, Manejo de Errores, Mantenibilidad, Seguridad Básica, Documentación.
+
+REGLAS DE PUNTUACIÓN (obligatorias):
+- "puntuacion_calidad" = promedio aritmético de las 7 dimensiones, redondeado a 1 decimal.
+- "nivel_riesgo" según la puntuacion_calidad: >=8 "BAJO", >=6 "MEDIO", >=4 "ALTO", <4 "CRÍTICO".
+- "apto_para_despliegue" = true SOLO si puntuacion_calidad >= 8 y no hay fallos graves de seguridad.
+- Penaliza con fuerza (dimensión <=3): credenciales o secretos escritos en el código,
+  inyección SQL, ausencia total de manejo de errores.
+
+Responde SOLO con JSON puro (sin markdown, sin texto extra):
 {
-  "resumen_general": "texto breve",
-  "puntuacion_calidad": <número 1 a 10>,
+  "resumen_general": "texto breve y objetivo",
+  "puntuacion_calidad": <número con 1 decimal>,
   "nivel_riesgo": "BAJO|MEDIO|ALTO|CRÍTICO",
   "dimensiones": [
-    {"nombre": "Código Limpio", "puntuacion": <1-10>, "estado": "BIEN|MEJORABLE|PROBLEMA|CRÍTICO", "hallazgos": ["..."], "recomendaciones": ["..."]}
+    {"nombre":"Código Limpio","puntuacion":<1-10>,"estado":"BIEN|MEJORABLE|PROBLEMA|CRÍTICO","hallazgos":["..."],"recomendaciones":["..."]}
   ],
   "problemas_criticos": ["..."],
   "recomendaciones_prioritarias": ["..."],
   "apto_para_despliegue": true|false
-}
-Evalúa 7 dimensiones: Código Limpio, Modularidad, Legibilidad, Manejo de Errores, Mantenibilidad, Seguridad Básica, Documentación.
-Responde ÚNICAMENTE el JSON.`.trim();
+}`.trim();
 
 const PROMPT_CORRECCION = `
-Eres un ingeniero experto en refactorización. Reescribe el código aplicando las recomendaciones y las buenas prácticas
-(código limpio, modularidad, legibilidad, manejo de errores, mantenibilidad, seguridad, documentación).
-REGLAS: no cambies la funcionalidad; conserva el lenguaje; no agregues dependencias nuevas.
+Eres un ingeniero experto en refactorización. Reescribe el código aplicando TODAS las recomendaciones
+y las buenas prácticas de las 7 dimensiones de calidad (código limpio, modularidad, legibilidad,
+manejo de errores, mantenibilidad, seguridad, documentación).
+REGLAS: no cambies la funcionalidad; conserva el lenguaje original; no agregues dependencias nuevas;
+elimina credenciales embebidas y corrige vulnerabilidades.
 Devuelve ÚNICAMENTE el código corregido completo, sin explicaciones y SIN delimitadores markdown.`.trim();
 
 // ─────────────────────────────────────────────────────────────
 //  Llamada a Groq
 // ─────────────────────────────────────────────────────────────
 
-async function groq(system, user, maxTokens) {
+async function groq(system, user, maxTokens, temperatura) {
   if (!GROQ_API_KEY) throw new Error("Falta GROQ_API_KEY en el servidor.");
   const res = await fetch(GROQ_URL, {
     method: "POST",
@@ -69,7 +92,7 @@ async function groq(system, user, maxTokens) {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      temperature: 0.15,
+      temperature: temperatura ?? 0,
       max_tokens: maxTokens || 4096,
     }),
   });
@@ -81,7 +104,7 @@ async function groq(system, user, maxTokens) {
   return data.choices[0].message.content.trim();
 }
 
-function limpiarJson(txt) {
+function quitarCerca(txt) {
   if (txt.startsWith("```")) {
     const lineas = txt.split("\n");
     if (lineas[0].startsWith("```")) lineas.shift();
@@ -91,21 +114,24 @@ function limpiarJson(txt) {
   return txt;
 }
 
-function limpiarCodigo(txt) {
-  if (txt.startsWith("```")) {
-    const lineas = txt.split("\n");
-    if (lineas[0].startsWith("```")) lineas.shift();
-    if (lineas.length && lineas[lineas.length - 1].trim() === "```") lineas.pop();
-    txt = lineas.join("\n");
+// Recalcula la puntuación como promedio de las dimensiones (garantiza coherencia)
+function normalizarAnalisis(a) {
+  const dims = a.dimensiones || [];
+  if (dims.length) {
+    const suma = dims.reduce((s, d) => s + (Number(d.puntuacion) || 0), 0);
+    const prom = Math.round((suma / dims.length) * 10) / 10;
+    a.puntuacion_calidad = prom;
+    a.nivel_riesgo = prom >= 8 ? "BAJO" : prom >= 6 ? "MEDIO" : prom >= 4 ? "ALTO" : "CRÍTICO";
+    a.apto_para_despliegue = prom >= UMBRAL;
   }
-  return txt.trim() + "\n";
+  return a;
 }
 
-function recomendacionesTexto(analisis) {
+function recomendacionesTexto(a) {
   const partes = [];
-  for (const p of analisis.problemas_criticos || []) partes.push(`- [CRÍTICO] ${p}`);
-  for (const r of analisis.recomendaciones_prioritarias || []) partes.push(`- ${r}`);
-  for (const d of analisis.dimensiones || [])
+  for (const p of a.problemas_criticos || []) partes.push(`- [CRÍTICO] ${p}`);
+  for (const r of a.recomendaciones_prioritarias || []) partes.push(`- ${r}`);
+  for (const d of a.dimensiones || [])
     for (const r of d.recomendaciones || []) partes.push(`- (${d.nombre}) ${r}`);
   return partes.join("\n");
 }
@@ -113,15 +139,15 @@ function recomendacionesTexto(analisis) {
 async function analizar(codigo, nombre) {
   const ext = (nombre || "").split(".").pop();
   const user = `Analiza este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\n\`\`\`\n${codigo.slice(0, 12000)}\n\`\`\``;
-  const raw = await groq(PROMPT_ANALISIS, user, 4096);
-  return JSON.parse(limpiarJson(raw));
+  const raw = await groq(PROMPT_ANALISIS, user, 4096, 0);
+  return normalizarAnalisis(JSON.parse(quitarCerca(raw)));
 }
 
 async function corregir(codigo, nombre, recomendaciones) {
   const ext = (nombre || "").split(".").pop();
   const user = `Corrige este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
-  const raw = await groq(PROMPT_CORRECCION, user, 8192);
-  return limpiarCodigo(raw);
+  const raw = await groq(PROMPT_CORRECCION, user, 8192, 0.1);
+  return quitarCerca(raw).trim() + "\n";
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -132,7 +158,6 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true, modelo: MODELO, configurado: Boolean(GROQ_API_KEY) });
 });
 
-// Analiza el código y devuelve el reporte con la puntuación
 app.post("/api/analizar", async (req, res) => {
   try {
     const { codigo, nombre } = req.body;
@@ -144,7 +169,6 @@ app.post("/api/analizar", async (req, res) => {
   }
 });
 
-// Corrige el código iterativamente hasta alcanzar el umbral (8) o el máximo de intentos
 app.post("/api/corregir", async (req, res) => {
   try {
     let { codigo, nombre } = req.body;
@@ -158,8 +182,7 @@ app.post("/api/corregir", async (req, res) => {
       progresion.push(analisis.puntuacion_calidad);
       if (analisis.puntuacion_calidad >= UMBRAL) break;
       if (i === MAX_ITER) break;
-      const recs = recomendacionesTexto(analisis);
-      const nuevo = await corregir(codigo, nombre, recs);
+      const nuevo = await corregir(codigo, nombre, recomendacionesTexto(analisis));
       if (!nuevo || nuevo.trim() === codigo.trim()) break;
       codigo = nuevo;
     }
@@ -176,14 +199,18 @@ app.post("/api/corregir", async (req, res) => {
   }
 });
 
-// "Despliegue": la app pide permiso para integrarse al sistema del usuario.
-// (En la tesis se usa el HelpDesk; aquí se registra la intención de integración.)
+// Despliegue REAL al HelpDesk: escribe el archivo en la carpeta que sirve el HelpDesk.
 app.post("/api/desplegar", async (req, res) => {
   try {
-    const { destino } = req.body || {};
+    const { nombre, codigo } = req.body;
+    if (!codigo || !codigo.trim()) throw new Error("No hay código para desplegar.");
+    // Nombre seguro (sin rutas relativas) para evitar escribir fuera de la carpeta
+    const archivo = path.basename(nombre || "index.html");
+    if (!fs.existsSync(HELPDESK_DIR)) throw new Error("La carpeta del HelpDesk no está montada en el servidor.");
+    fs.writeFileSync(path.join(HELPDESK_DIR, archivo), codigo, "utf-8");
     res.json({
       ok: true,
-      mensaje: `Integración autorizada. Código apto desplegado en el entorno "${destino || "producción"}".`,
+      mensaje: `Desplegado en el HelpDesk: se actualizó "${archivo}". Míralo en ${HELPDESK_URL}`,
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

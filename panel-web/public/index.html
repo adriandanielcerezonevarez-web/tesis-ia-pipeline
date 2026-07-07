@@ -258,8 +258,14 @@ async function corregirIA() {
     if (!d.ok) throw new Error(d.error);
     codigoActual = d.codigo_corregido;
     renderReporte(d.analisis, true, d.progresion);
-    if (d.apto) $("estado").textContent = "Corregido y apto";
-    else $("estado").textContent = "No alcanzó 8 en los intentos";
+    if (d.apto) {
+      $("estado").textContent = "Corregido y apto";
+      $("resultado").insertAdjacentHTML("beforeend",
+        `<div class="card aviso ok">La IA alcanzó ${d.analisis.puntuacion_calidad}/10. Desplegando automáticamente al HelpDesk…</div>`);
+      await desplegarAhora();
+    } else {
+      $("estado").textContent = "No alcanzó 8 en los intentos";
+    }
   } catch (e) {
     $("resultado").innerHTML = `<div class="card aviso warn">Error: ${e.message}</div>`;
   }
@@ -285,13 +291,21 @@ function pedirDespliegue() {
     </div></div></div>`;
 }
 function cerrarModal() { $("modal").innerHTML = ""; }
-async function confirmarDespliegue() {
-  cerrarModal();
-  $("estado").textContent = "Desplegando…";
-  const d = await post("/api/desplegar", { destino:"producción" });
-  $("resultado").insertAdjacentHTML("beforeend",
-    `<div class="card aviso ok">${d.mensaje || "Desplegado."}</div>`);
-  $("estado").textContent = "Desplegado";
+async function confirmarDespliegue() { cerrarModal(); await desplegarAhora(); }
+
+async function desplegarAhora() {
+  $("estado").textContent = "Desplegando al HelpDesk…";
+  try {
+    const d = await post("/api/desplegar", { nombre:nombreActual, codigo:codigoActual });
+    if (!d.ok) throw new Error(d.error);
+    $("resultado").insertAdjacentHTML("beforeend",
+      `<div class="card aviso ok">${d.mensaje}</div>`);
+    $("estado").textContent = "Desplegado";
+  } catch (e) {
+    $("resultado").insertAdjacentHTML("beforeend",
+      `<div class="card aviso warn">Error al desplegar: ${e.message}</div>`);
+    $("estado").textContent = "Error";
+  }
 }
 
 function descargarPDF() {
