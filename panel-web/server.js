@@ -21,9 +21,10 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
-const MODELO = "llama-3.3-70b-versatile";
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// Proveedor de IA (Cerebras por defecto; configurable por variables de entorno).
+const LLM_KEY = process.env.CEREBRAS_API_KEY || process.env.GROQ_API_KEY || "";
+const MODELO = process.env.LLM_MODEL || "llama-3.3-70b";
+const LLM_URL = process.env.LLM_URL || "https://api.cerebras.ai/v1/chat/completions";
 const UMBRAL = 8;                                    // nota mínima para desplegar
 const MAX_ITER = 4;                                  // correcciones máximas
 const HELPDESK_DIR = process.env.HELPDESK_DIR || "/helpdesk";  // carpeta del HelpDesk (volumen)
@@ -53,6 +54,9 @@ REGLAS DE PUNTUACIÓN (obligatorias):
 - Penaliza con fuerza (dimensión <=3): credenciales o secretos escritos en el código,
   inyección SQL, ausencia total de manejo de errores.
 
+Sé CONCISO para ahorrar espacio: máximo 2 hallazgos y 2 recomendaciones por dimensión,
+y máximo 3 recomendaciones prioritarias en total.
+
 Responde SOLO con JSON puro (sin markdown, sin texto extra):
 {
   "resumen_general": "texto breve y objetivo",
@@ -78,12 +82,14 @@ Devuelve ÚNICAMENTE el código corregido completo, sin explicaciones y SIN deli
 //  Llamada a Groq
 // ─────────────────────────────────────────────────────────────
 
-async function groq(system, user, maxTokens, temperatura) {
-  if (!GROQ_API_KEY) throw new Error("Falta GROQ_API_KEY en el servidor.");
-  const res = await fetch(GROQ_URL, {
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function groq(system, user, maxTokens, temperatura, intentos = 0) {
+  if (!LLM_KEY) throw new Error("Falta la API key del proveedor de IA (CEREBRAS_API_KEY).");
+  const res = await fetch(LLM_URL, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${GROQ_API_KEY}`,
+      "Authorization": `Bearer ${LLM_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -96,6 +102,17 @@ async function groq(system, user, maxTokens, temperatura) {
       max_tokens: maxTokens || 4096,
     }),
   });
+
+  // Límite de tokens por minuto (plan gratis): esperar y reintentar en vez de fallar.
+  if (res.status === 429 && intentos < 4) {
+    const texto = await res.text();
+    let espera = 18000;
+    const m = texto.match(/try again in ([\d.]+)s/i);
+    if (m) espera = Math.ceil(parseFloat(m[1]) * 1000) + 1500;
+    await dormir(Math.min(espera, 65000));
+    return groq(system, user, maxTokens, temperatura, intentos + 1);
+  }
+
   if (!res.ok) {
     const t = await res.text();
     throw new Error(`Groq ${res.status}: ${t.slice(0, 200)}`);
@@ -138,15 +155,17 @@ function recomendacionesTexto(a) {
 
 async function analizar(codigo, nombre) {
   const ext = (nombre || "").split(".").pop();
-  const user = `Analiza este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\n\`\`\`\n${codigo.slice(0, 12000)}\n\`\`\``;
-  const raw = await groq(PROMPT_ANALISIS, user, 4096, 0);
+  // Se recorta el código para respetar el límite de tokens del plan gratis de Groq.
+  const user = `Analiza este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\n\`\`\`\n${codigo.slice(0, 7000)}\n\`\`\``;
+  const raw = await groq(PROMPT_ANALISIS, user, 2048, 0);
   return normalizarAnalisis(JSON.parse(quitarCerca(raw)));
 }
 
 async function corregir(codigo, nombre, recomendaciones) {
   const ext = (nombre || "").split(".").pop();
+  const maxT = Math.min(8000, Math.max(2048, Math.ceil(codigo.length / 2)));
   const user = `Corrige este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
-  const raw = await groq(PROMPT_CORRECCION, user, 8192, 0.1);
+  const raw = await groq(PROMPT_CORRECCION, user, maxT, 0.1);
   return quitarCerca(raw).trim() + "\n";
 }
 
@@ -155,7 +174,7 @@ async function corregir(codigo, nombre, recomendaciones) {
 // ─────────────────────────────────────────────────────────────
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, modelo: MODELO, configurado: Boolean(GROQ_API_KEY) });
+  res.json({ ok: true, modelo: MODELO, configurado: Boolean(LLM_KEY) });
 });
 
 app.post("/api/analizar", async (req, res) => {
