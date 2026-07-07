@@ -84,7 +84,7 @@ Devuelve ÚNICAMENTE el código corregido completo, sin explicaciones y SIN deli
 
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function groq(system, user, maxTokens, temperatura, intentos = 0) {
+async function groq(system, user, maxTokens, temperatura, extra = {}, intentos = 0) {
   if (!LLM_KEY) throw new Error("Falta la API key del proveedor de IA (CEREBRAS_API_KEY).");
   const res = await fetch(LLM_URL, {
     method: "POST",
@@ -100,25 +100,35 @@ async function groq(system, user, maxTokens, temperatura, intentos = 0) {
       ],
       temperature: temperatura ?? 0,
       max_tokens: maxTokens || 4096,
+      ...extra,
     }),
   });
 
-  // Límite de tokens por minuto (plan gratis): esperar y reintentar en vez de fallar.
+  // Límite de tokens por minuto: esperar y reintentar en vez de fallar.
   if (res.status === 429 && intentos < 4) {
     const texto = await res.text();
     let espera = 18000;
     const m = texto.match(/try again in ([\d.]+)s/i);
     if (m) espera = Math.ceil(parseFloat(m[1]) * 1000) + 1500;
     await dormir(Math.min(espera, 65000));
-    return groq(system, user, maxTokens, temperatura, intentos + 1);
+    return groq(system, user, maxTokens, temperatura, extra, intentos + 1);
   }
 
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Groq ${res.status}: ${t.slice(0, 200)}`);
+    throw new Error(`IA ${res.status}: ${t.slice(0, 200)}`);
   }
   const data = await res.json();
-  return data.choices[0].message.content.trim();
+  return (data.choices[0].message.content || "").trim();
+}
+
+// Extrae el objeto JSON aunque el modelo agregue texto o razonamiento alrededor.
+function extraerJson(txt) {
+  txt = quitarCerca(txt);
+  const i = txt.indexOf("{");
+  const j = txt.lastIndexOf("}");
+  if (i >= 0 && j > i) txt = txt.slice(i, j + 1);
+  return JSON.parse(txt);
 }
 
 function quitarCerca(txt) {
@@ -157,15 +167,15 @@ async function analizar(codigo, nombre) {
   const ext = (nombre || "").split(".").pop();
   // Se recorta el código para respetar el límite de tokens del plan gratis de Groq.
   const user = `Analiza este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\n\`\`\`\n${codigo.slice(0, 7000)}\n\`\`\``;
-  const raw = await groq(PROMPT_ANALISIS, user, 2048, 0);
-  return normalizarAnalisis(JSON.parse(quitarCerca(raw)));
+  const raw = await groq(PROMPT_ANALISIS, user, 8000, 0, { reasoning_effort: "low" });
+  return normalizarAnalisis(extraerJson(raw));
 }
 
 async function corregir(codigo, nombre, recomendaciones) {
   const ext = (nombre || "").split(".").pop();
   const maxT = Math.min(8000, Math.max(2048, Math.ceil(codigo.length / 2)));
   const user = `Corrige este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
-  const raw = await groq(PROMPT_CORRECCION, user, maxT, 0.1);
+  const raw = await groq(PROMPT_CORRECCION, user, maxT, 0.1, { reasoning_effort: "low" });
   return quitarCerca(raw).trim() + "\n";
 }
 
