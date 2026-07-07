@@ -20,6 +20,9 @@ services:
     restart: unless-stopped
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - HELPDESK_DIR=/helpdesk
+    volumes:
+      - ./html:/helpdesk
     expose:
       - "3000"
 
