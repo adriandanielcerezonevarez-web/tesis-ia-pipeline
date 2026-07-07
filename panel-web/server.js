@@ -71,11 +71,20 @@ Responde SOLO con JSON puro (sin markdown, sin texto extra):
 }`.trim();
 
 const PROMPT_CORRECCION = `
-Eres un ingeniero experto en refactorización. Reescribe el código aplicando TODAS las recomendaciones
-y las buenas prácticas de las 7 dimensiones de calidad (código limpio, modularidad, legibilidad,
-manejo de errores, mantenibilidad, seguridad, documentación).
-REGLAS: no cambies la funcionalidad; conserva el lenguaje original; no agregues dependencias nuevas;
-elimina credenciales embebidas y corrige vulnerabilidades.
+Eres un ingeniero experto. Mejora la calidad del código de forma CONSERVADORA, sin romper nada.
+
+REGLAS OBLIGATORIAS (respétalas todas):
+1. Devuelve el archivo COMPLETO, sin recortar ni omitir nada. Prohibido usar "..." o resúmenes.
+2. NO reestructures el archivo. NO separes el CSS ni el JavaScript a archivos externos:
+   si están embebidos (dentro de <style> o <script>), DÉJALOS embebidos exactamente igual.
+3. NO cambies, agregues ni quites etiquetas <link>, <script src>, ni ninguna referencia a archivos
+   o recursos externos. Mantén las MISMAS rutas y los mismos recursos que ya tenía.
+4. NO agregues Content-Security-Policy ni meta etiquetas nuevas. NO inventes valores integrity/SRI.
+5. CONSERVA todos los estilos y la estructura visual EXACTAMENTE: el archivo debe verse y funcionar
+   IDÉNTICO al original. Debe funcionar POR SÍ SOLO, sin depender de archivos nuevos que no existían.
+6. Solo puedes: quitar credenciales/secretos embebidos, corregir vulnerabilidades de lógica (ej.
+   inyección), mejorar nombres de variables internas y agregar comentarios. NADA más.
+
 Devuelve ÚNICAMENTE el código corregido completo, sin explicaciones y SIN delimitadores markdown.`.trim();
 
 // ─────────────────────────────────────────────────────────────
@@ -173,7 +182,7 @@ async function analizar(codigo, nombre) {
 
 async function corregir(codigo, nombre, recomendaciones) {
   const ext = (nombre || "").split(".").pop();
-  const maxT = Math.min(8000, Math.max(2048, Math.ceil(codigo.length / 2)));
+  const maxT = Math.min(24000, Math.max(4000, Math.ceil(codigo.length / 2) + 3000));
   const user = `Corrige este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
   const raw = await groq(PROMPT_CORRECCION, user, maxT, 0.1, { reasoning_effort: "low" });
   return quitarCerca(raw).trim() + "\n";
@@ -213,6 +222,8 @@ app.post("/api/corregir", async (req, res) => {
       if (i === MAX_ITER) break;
       const nuevo = await corregir(codigo, nombre, recomendacionesTexto(analisis));
       if (!nuevo || nuevo.trim() === codigo.trim()) break;
+      // Freno de seguridad: si el resultado salió muy recortado, está roto -> no aplicar.
+      if (nuevo.length < codigo.length * 0.6) break;
       codigo = nuevo;
     }
 
