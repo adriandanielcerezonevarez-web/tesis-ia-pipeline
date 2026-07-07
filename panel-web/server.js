@@ -23,7 +23,7 @@ app.use(express.static(path.join(__dirname, "public")));
 const PORT = process.env.PORT || 3000;
 // Proveedor de IA (Cerebras por defecto; configurable por variables de entorno).
 const LLM_KEY = process.env.CEREBRAS_API_KEY || process.env.GROQ_API_KEY || "";
-const MODELO = process.env.LLM_MODEL || "llama-3.3-70b";
+const MODELO = process.env.LLM_MODEL || "gpt-oss-120b";
 const LLM_URL = process.env.LLM_URL || "https://api.cerebras.ai/v1/chat/completions";
 const UMBRAL = 8;                                    // nota mínima para desplegar
 const MAX_ITER = 4;                                  // correcciones máximas
