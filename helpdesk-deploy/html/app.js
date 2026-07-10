@@ -34,13 +34,24 @@ import {
 } from './utils.js';
 
 /**
- * Centralized logger.
+ * Centralized logger that redacts sensitive fields.
  * @param {'info'|'warn'|'error'} level - Log level.
  * @param {...any} args - Values to log.
  */
 function logger(level, ...args) {
+  const redacted = args.map(arg => {
+    if (arg && typeof arg === 'object') {
+      const clone = { ...arg };
+      const sensitive = ['password', 'token', 'apiKey', 'secret'];
+      sensitive.forEach(key => {
+        if (key in clone) clone[key] = '[REDACTED]';
+      });
+      return clone;
+    }
+    return arg;
+  });
   const prefix = `[${new Date().toISOString()}] [${level.toUpperCase()}]`;
-  console[level](`${prefix}`, ...args);
+  console[level](`${prefix}`, ...redacted);
 }
 
 /**
@@ -54,8 +65,8 @@ function handleError(err, userMessage, context = '') {
   showToast(userMessage, 'error');
 }
 
-/* ---------- State Store (immutable pattern) ---------- */
-const StateStore = (() => {
+/* ---------- State Service (read‑only) ---------- */
+const StateService = (() => {
   /** @type {Object} Internal immutable state */
   let _state = {
     session: null,
@@ -68,86 +79,84 @@ const StateStore = (() => {
     pendingDeleteTicketId: null
   };
 
-  /**
-   * Returns a shallow copy of the current state.
-   * @returns {Object}
-   */
+  /** Returns a shallow copy of the current state. */
   function getState() {
     return { ..._state };
   }
 
-  /**
-   * Merges a new partial state into the internal state.
-   * @param {Object} newState
-   */
+  /** Merges a new partial state into the internal state. */
   function setState(newState) {
     _state = { ..._state, ...newState };
   }
 
-  /**
-   * Public update method.
-   * @param {Object} partial
-   */
+  /** Public update method. */
   function update(partial) {
     setState(partial);
   }
 
-  return { getState, update };
+  /** Safe getters for sensitive data. */
+  function getSession() {
+    return _state.session;
+  }
+
+  function getTickets() {
+    return [..._state.tickets];
+  }
+
+  function getUsers() {
+    return [..._state.users];
+  }
+
+  return { getState, update, getSession, getTickets, getUsers };
 })();
 
-/* ---------- Repository Abstraction ---------- */
-class TicketRepository {
+/* ---------- Repository Implementations ---------- */
+class FirebaseTicketRepository {
   /**
-   * @param {boolean} useFirebase
-   * @param {Object} db
+   * @param {Object} db - Firebase Firestore instance.
    */
-  constructor(useFirebase, db) {
-    this.useFirebase = useFirebase;
+  constructor(db) {
     this.db = db;
   }
 
-  /**
-   * Create a new ticket.
-   * @param {Object} ticket
-   * @param {Array} currentTickets
-   * @returns {Promise<void>}
-   */
-  async create(ticket, currentTickets) {
-    if (this.useFirebase) {
-      const id = await generateTicketId();
-      await this.db.collection('tickets').doc(id).set({ id, ...ticket });
-    } else {
-      const id = generateLocalTicketId();
-      const newTicket = { id, ...ticket };
-      const newList = [newTicket, ...currentTickets];
-      StateStore.update({ tickets: newList });
-      saveTicketLocal(newList);
-    }
+  async create(ticket) {
+    const id = await generateTicketId();
+    await this.db.collection('tickets').doc(id).set({ id, ...ticket });
   }
 
+  async update(id, ticket) {
+    await this.db.collection('tickets').doc(id).update(ticket);
+  }
+}
+
+class LocalTicketRepository {
   /**
-   * Update an existing ticket.
-   * @param {string} id
-   * @param {Object} ticket
-   * @param {Array} currentTickets
-   * @returns {Promise<void>}
+   * @param {Array} currentTickets - Current ticket list.
    */
-  async update(id, ticket, currentTickets) {
-    if (this.useFirebase) {
-      await this.db.collection('tickets').doc(id).update(ticket);
-    } else {
-      const idx = currentTickets.findIndex(t => t.id === id);
-      if (idx === -1) throw new Error('Ticket to update not found');
-      const updated = {
-        ...currentTickets[idx],
-        ...ticket,
-        updatedAt: new Date().toISOString()
-      };
-      const newList = [...currentTickets];
-      newList[idx] = updated;
-      StateStore.update({ tickets: newList });
-      saveTicketLocal(newList);
-    }
+  constructor(currentTickets) {
+    this.currentTickets = currentTickets;
+  }
+
+  async create(ticket) {
+    const id = generateLocalTicketId();
+    const newTicket = { id, ...ticket };
+    const newList = [newTicket, ...this.currentTickets];
+    StateService.update({ tickets: newList });
+    saveTicketLocal(newList);
+  }
+
+  async update(id, ticket) {
+    const idx = this.currentTickets.findIndex(t => t.id === id);
+    if (idx === -1) throw new Error('Ticket to update not found');
+    const updated = {
+      ...this.currentTickets[idx],
+      ...ticket,
+      updatedAt: new Date().toISOString()
+    };
+    const newList = [...this.currentTickets];
+    newList[idx] = updated;
+    StateService.update({ tickets: newList });
+    saveTicketLocal(newList);
   }
 }
 
@@ -171,9 +180,7 @@ const DataService = (() => {
     return null;
   }
 
-  /**
-   * Loads initial data from Firebase; falls back to local storage on error.
-   */
+  /** Loads initial data from Firebase; falls back to local storage on error. */
   async function loadInitialData() {
     try {
       await loadUsers();
@@ -185,9 +192,7 @@ const DataService = (() => {
     }
   }
 
-  /**
-   * Loads data from local storage with validation.
-   */
+  /** Loads data from local storage with validation. */
   function fallbackToLocalStorage() {
     updateConnectionBadge(false);
     const ticketsRaw = loadFromStorage('helpdesk_tickets');
@@ -196,8 +201,8 @@ const DataService = (() => {
     const tickets = validateStorageData(ticketsRaw, 'tickets');
     const users = validateStorageData(usersRaw, 'users');
 
-    if (tickets) StateStore.update({ tickets });
-    if (users) StateStore.update({ users });
+    if (tickets) StateService.update({ tickets });
+    if (users) StateService.update({ users });
   }
 
   return { loadInitialData, fallbackToLocalStorage };
@@ -258,11 +263,9 @@ const TicketService = (() => {
    * @throws {Error} If not authorized.
    */
   function authorize(session, ticketData) {
-    // Only admin can assign tickets to others
     if (ticketData.assigned && session.role !== 'admin') {
       throw new Error('Solo administradores pueden asignar tickets');
     }
-    // Requester must match session unless admin
     if (session.role !== 'admin' && ticketData.requesterId && ticketData.requesterId !== session.userId) {
       throw new Error('No está autorizado a crear tickets para otro usuario');
     }
@@ -280,8 +283,9 @@ const TicketService = (() => {
       return;
     }
 
-    const { session, db, useFirebase, tickets } = StateStore.getState();
+    const { session, db, useFirebase, tickets } = StateService.getState();
     const ticketData = buildTicket(validation.data, session);
+
     try {
       authorize(session, ticketData);
     } catch (authErr) {
@@ -289,18 +293,20 @@ const TicketService = (() => {
       return;
     }
 
-    const { editingTicketId } = StateStore.getState();
+    const { editingTicketId } = StateService.getState();
     const isUpdate = Boolean(editingTicketId);
-    const repo = new TicketRepository(useFirebase, db);
+    const repo = useFirebase
+      ? new FirebaseTicketRepository(db)
+      : new LocalTicketRepository(tickets);
 
     try {
       if (isUpdate) {
-        await repo.update(editingTicketId, ticketData, tickets);
+        await repo.update(editingTicketId, ticketData);
       } else {
-        await repo.create(ticketData, tickets);
+        await repo.create(ticketData);
       }
       showToast(isUpdate ? 'Ticket actualizado' : 'Ticket creado', 'success');
-      StateStore.update({ editingTicketId: null });
+      StateService.update({ editingTicketId: null });
     } catch (err) {
       handleError(err, 'Error al guardar ticket', 'TicketService.save');
     }
@@ -311,22 +317,21 @@ const TicketService = (() => {
 
 /* ---------- UI Controller ---------- */
 const UIController = (() => {
-  /**
-   * Initialize authentication layer.
-   * @returns {boolean} True if auth initialized successfully.
-   */
-  function initAuthentication() {
-    const ok = initAuth();
-    if (!ok) {
-      showToast('Error al iniciar sesión', 'error');
+  /** Initialize authentication layer with proper error handling. */
+  async function initAuthentication() {
+    try {
+      const ok = await initAuth();
+      if (!ok) {
+        showToast('Error al iniciar sesión', 'error');
+      }
+      return ok;
+    } catch (err) {
+      handleError(err, 'Error al iniciar sesión', 'AuthInit');
+      return false;
     }
-    return ok;
   }
 
-  /**
-   * Initialize Firebase layer with error handling.
-   * @returns {Promise<void>}
-   */
+  /** Initialize Firebase layer with error handling. */
   async function initFirebaseLayer() {
     try {
       await initFirebase();
@@ -335,32 +340,26 @@ const UIController = (() => {
     }
   }
 
-  /**
-   * Initialize UI components and event listeners.
-   */
+  /** Initialize UI components and event listeners. */
   function initUI() {
     renderAll();
     setupSidebar();
     setupCharCounter();
 
     const session = getSession();
-    StateStore.update({ session });
+    StateService.update({ session });
     showSection(session.role === 'admin' ? 'dashboard' : 'mytickets');
   }
 
-  /**
-   * Main entry point for the application.
-   */
+  /** Main entry point for the application. */
   async function init() {
-    if (!initAuthentication()) return;
+    if (!await initAuthentication()) return;
     await initFirebaseLayer();
     await DataService.loadInitialData();
     initUI();
   }
 
-  /**
-   * Configures sidebar toggle and connection status indicator.
-   */
+  /** Configures sidebar toggle and connection status indicator. */
   function setupSidebar() {
     const toggle = document.getElementById('sidebarToggle');
     const sidebar = document.getElementById('sidebar');
@@ -379,9 +378,7 @@ const UIController = (() => {
     }
   }
 
-  /**
-   * Sets up character counter for ticket description field.
-   */
+  /** Sets up character counter for ticket description field. */
   function setupCharCounter() {
     const desc = document.getElementById('ticketDescription');
     const count = document.getElementById('charCount');
@@ -392,10 +389,7 @@ const UIController = (() => {
     }
   }
 
-  /**
-   * Handler attached to the ticket form submit event.
-   * @param {Event} e
-   */
+  /** Handler attached to the ticket form submit event. */
   async function handleSaveTicket(e) {
     e.preventDefault();
     const fields = {
@@ -410,27 +404,41 @@ const UIController = (() => {
       notes: document.getElementById('ticketNotes')?.value
     };
     await TicketService.save(fields);
-    const { session } = StateStore.getState();
+    const { session } = StateService.getState();
     showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
   }
 
-  return { init, handleSaveTicket };
+  /** Cleanup listeners when the page is unloaded. */
+  function cleanup() {
+    const toggle = document.getElementById('sidebarToggle');
+    if (toggle) {
+      toggle.replaceWith(toggle.cloneNode(true));
+    }
+    const desc = document.getElementById('ticketDescription');
+    if (desc) {
+      desc.replaceWith(desc.cloneNode(true));
+    }
+  }
+
+  return { init, handleSaveTicket, cleanup };
 })();
 
 /* ---------- Exported Public API ---------- */
 export {
-  // State (read‑only)
-  StateStore as state,
-  // UI entry point
+  /** UI entry point */
   UIController as uiController,
-  // Auth utilities
+  /** Auth utilities */
   logout,
-  // Ticket id generators (kept for backward compatibility)
+  /** Ticket ID generators (kept for backward compatibility) */
   generateLocalTicketId,
   generateTicketId,
-  // Fallback utilities
+  /** Fallback utilities */
   DataService.fallbackToLocalStorage,
-  clearDataBackend
+  clearDataBackend,
+  /** Safe state getters */
+  StateService.getSession as getSession,
+  StateService.getTickets as getTickets,
+  StateService.getUsers as getUsers
 };
 
 document.addEventListener('DOMContentLoaded', UIController.init);
