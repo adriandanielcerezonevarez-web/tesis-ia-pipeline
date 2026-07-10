@@ -76,7 +76,7 @@ jobs:
           python-version: "3.11"
 
       - name: Instalar dependencias
-        run: pip install groq
+        run: pip install openai
 
       - name: Detectar archivos de código del PR
         id: archivos
@@ -91,7 +91,7 @@ jobs:
       - name: Corregir iterativamente con IA (hasta 8/10)
         if: steps.archivos.outputs.lista != ''
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
         run: |
           ARCHIVOS="${{ steps.archivos.outputs.lista }}"
           echo "===== Corrección iterativa con IA (objetivo: 8/10) ====="

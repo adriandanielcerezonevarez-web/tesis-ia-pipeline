@@ -119,7 +119,7 @@ jobs:
       - name: Instalar dependencias del analizador IA
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         run: |
-          pip install groq
+          pip install openai
 
       # ── Ejecutar el analizador de IA ──
       - name: Ejecutar análisis de calidad con IA
@@ -127,7 +127,7 @@ jobs:
         id: analisis-ia
         continue-on-error: true   # El reporte se publica aunque el pipeline bloquee el merge
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
         run: |
           ARCHIVOS="${{ steps.archivos-modificados.outputs.lista_archivos }}"
           echo "Iniciando análisis de IA sobre: $ARCHIVOS"
@@ -277,7 +277,7 @@ jobs:
           command_timeout: "20m"
           script: |
             set -e
-            echo " Iniciando despliegue automático..."
+            echo "🚀 Iniciando despliegue automático..."
             REPO=/root/tesis-ia-pipeline
             if [ ! -d "$REPO/.git" ]; then
               git clone https://github.com/adriandanielcerezonevarez-web/tesis-ia-pipeline.git "$REPO"
@@ -291,4 +291,3 @@ jobs:
             docker compose up -d --build --remove-orphans
             docker image prune -f
             echo "✅ Despliegue completado. HelpDesk en https://helpdesk-arce.duckdns.org"
-
