@@ -19,18 +19,21 @@ import argparse
 from pathlib import Path
 
 try:
-    from groq import Groq
+    from openai import OpenAI
 except ImportError:
-    print("ERROR: Librería 'groq' no instalada. Ejecuta: pip install groq")
+    print("ERROR: Librería 'openai' no instalada. Ejecuta: pip install openai")
     sys.exit(1)
+
+# Proveedor de IA: Cerebras (endpoint compatible con OpenAI)
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 
 # ─────────────────────────────────────────────────────────────
 #  CONFIGURACIÓN DEL MODELO DE IA (igual que el analizador)
 # ─────────────────────────────────────────────────────────────
 
-MODELO_IA = "llama-3.3-70b-versatile"   # Modelo open source vía Groq
+MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
 TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras y consistentes
-MAX_TOKENS = 8192                         # Amplio para devolver archivos completos
+MAX_TOKENS = 12000                        # Amplio: gpt-oss razona y devuelve el archivo completo
 
 SYSTEM_PROMPT = """
 Eres un ingeniero de software experto en refactorización y calidad de código. Recibes un
@@ -98,7 +101,7 @@ def cargar_recomendaciones(ruta_reporte: str) -> dict:
     return recomendaciones_por_archivo
 
 
-def corregir_con_ia(cliente: Groq, codigo: str, nombre_archivo: str,
+def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
                     extension: str, recomendaciones: str) -> str:
     """
     Envía el código y las recomendaciones al modelo y retorna el código corregido.
@@ -135,6 +138,7 @@ Devuelve únicamente el código corregido completo, sin explicaciones ni markdow
             ],
             temperature=TEMPERATURA,
             max_tokens=MAX_TOKENS,
+            reasoning_effort="low",
         )
         contenido = respuesta.choices[0].message.content.strip()
 
@@ -163,12 +167,12 @@ def main():
                         help="Reporte JSON del análisis previo (default: reporte-ia.json)")
     args = parser.parse_args()
 
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("CEREBRAS_API_KEY")
     if not api_key:
-        print("ERROR: Variable de entorno GROQ_API_KEY no configurada.")
+        print("ERROR: Variable de entorno CEREBRAS_API_KEY no configurada.")
         sys.exit(1)
 
-    cliente = Groq(api_key=api_key)
+    cliente = OpenAI(api_key=api_key, base_url=CEREBRAS_BASE_URL)
     recomendaciones = cargar_recomendaciones(args.reporte)
 
     print(f"\n{'='*60}")

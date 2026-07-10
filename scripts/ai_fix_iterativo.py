@@ -25,13 +25,15 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from groq import Groq
+    from openai import OpenAI
 except ImportError:
-    print("ERROR: Librería 'groq' no instalada. Ejecuta: pip install groq")
+    print("ERROR: Librería 'openai' no instalada. Ejecuta: pip install openai")
     sys.exit(1)
 
 from ai_code_analyzer import analizar_con_ia, leer_archivo
 from ai_code_fixer import corregir_con_ia
+
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 
 
 def construir_recomendaciones(analisis: dict) -> str:
@@ -58,12 +60,12 @@ def main():
                         help="Máximo de correcciones por archivo (default: 4)")
     args = parser.parse_args()
 
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("CEREBRAS_API_KEY")
     if not api_key:
-        print("ERROR: Variable de entorno GROQ_API_KEY no configurada.")
+        print("ERROR: Variable de entorno CEREBRAS_API_KEY no configurada.")
         sys.exit(1)
 
-    cliente = Groq(api_key=api_key)
+    cliente = OpenAI(api_key=api_key, base_url=CEREBRAS_BASE_URL)
     historial = {}
 
     print(f"\n{'='*60}")

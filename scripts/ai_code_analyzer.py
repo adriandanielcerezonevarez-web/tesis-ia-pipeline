@@ -18,18 +18,21 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    from groq import Groq
+    from openai import OpenAI
 except ImportError:
-    print("ERROR: Librería 'groq' no instalada. Ejecuta: pip install groq")
+    print("ERROR: Librería 'openai' no instalada. Ejecuta: pip install openai")
     sys.exit(1)
+
+# Proveedor de IA: Cerebras (endpoint compatible con OpenAI)
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 
 # ─────────────────────────────────────────────────────────────
 #  CONFIGURACIÓN DEL MODELO DE IA
 # ─────────────────────────────────────────────────────────────
 
-MODELO_IA = "llama-3.3-70b-versatile"   # Modelo open source vía Groq
+MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
 TEMPERATURA = 0.2                         # Baja temperatura = respuestas más consistentes
-MAX_TOKENS = 4096
+MAX_TOKENS = 8000                         # Amplio: gpt-oss "razona" antes de responder
 
 # Criterios de análisis que evalúa la IA
 DIMENSIONES_ANALISIS = [
@@ -105,7 +108,7 @@ def leer_archivo(ruta: str) -> tuple[str, str]:
         return "", ""
 
 
-def analizar_con_ia(cliente: Groq, codigo: str, nombre_archivo: str, extension: str) -> dict:
+def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str) -> dict:
     """
     Envía el código al modelo de IA y retorna el análisis estructurado.
 
@@ -145,14 +148,20 @@ Proporciona el análisis completo en el formato JSON especificado.
             ],
             temperature=TEMPERATURA,
             max_tokens=MAX_TOKENS,
+            reasoning_effort="low",
         )
 
         contenido_respuesta = respuesta.choices[0].message.content.strip()
 
-        # Limpiar posibles delimitadores markdown del JSON
+        # Limpiar delimitadores markdown y extraer el objeto JSON
+        # (gpt-oss puede agregar texto de razonamiento alrededor del JSON).
         if contenido_respuesta.startswith("```"):
             lineas = contenido_respuesta.split("\n")
             contenido_respuesta = "\n".join(lineas[1:-1])
+        ini = contenido_respuesta.find("{")
+        fin = contenido_respuesta.rfind("}")
+        if ini >= 0 and fin > ini:
+            contenido_respuesta = contenido_respuesta[ini:fin + 1]
 
         return json.loads(contenido_respuesta)
 
@@ -371,13 +380,13 @@ def main():
     args = parser.parse_args()
 
     # Verificar API key
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("CEREBRAS_API_KEY")
     if not api_key:
-        print("ERROR: Variable de entorno GROQ_API_KEY no configurada.")
-        print("Obtén tu clave gratuita en: https://console.groq.com")
+        print("ERROR: Variable de entorno CEREBRAS_API_KEY no configurada.")
+        print("Obtén tu clave en: https://cloud.cerebras.ai")
         sys.exit(1)
 
-    cliente = Groq(api_key=api_key)
+    cliente = OpenAI(api_key=api_key, base_url=CEREBRAS_BASE_URL)
 
     print(f"\n{'='*60}")
     print(f"  ANALIZADOR DE CÓDIGO CON IA — Pipeline CI/CD")
