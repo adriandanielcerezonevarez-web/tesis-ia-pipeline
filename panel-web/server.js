@@ -188,6 +188,32 @@ async function corregir(codigo, nombre, recomendaciones) {
   return quitarCerca(raw).trim() + "\n";
 }
 
+// Explica los cambios entre el código original y el corregido (qué, por qué, mejora).
+async function resumirCambios(original, corregido, nombre) {
+  const sys = "Eres un revisor de código que explica los cambios de forma clara, breve y objetiva. Responde SOLO con JSON.";
+  const user = `Compara el código ORIGINAL con el CORREGIDO del archivo ${nombre} y lista los cambios más importantes que se hicieron.
+Para cada cambio indica: qué se cambió, por qué se cambió, y cuál fue la mejora obtenida.
+Responde SOLO este JSON (máximo 6 cambios, los más relevantes):
+{ "cambios": [ { "que": "descripción breve del cambio", "porque": "motivo", "mejora": "beneficio" } ] }
+
+ORIGINAL:
+\`\`\`
+${original.slice(0, 6000)}
+\`\`\`
+
+CORREGIDO:
+\`\`\`
+${corregido.slice(0, 6000)}
+\`\`\``;
+  try {
+    const raw = await groq(sys, user, 3000, 0, { reasoning_effort: "low" });
+    const obj = extraerJson(raw);
+    return Array.isArray(obj.cambios) ? obj.cambios : [];
+  } catch (e) {
+    return [];
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 //  Endpoints
 // ─────────────────────────────────────────────────────────────
@@ -211,6 +237,7 @@ app.post("/api/corregir", async (req, res) => {
   try {
     let { codigo, nombre } = req.body;
     if (!codigo || !codigo.trim()) throw new Error("No se recibió código.");
+    const original = codigo;
 
     const progresion = [];
     let analisis = null;
@@ -227,12 +254,19 @@ app.post("/api/corregir", async (req, res) => {
       codigo = nuevo;
     }
 
+    // Explicar qué cambió (solo si hubo cambios reales)
+    let cambios = [];
+    if (codigo.trim() !== original.trim()) {
+      cambios = await resumirCambios(original, codigo, nombre);
+    }
+
     res.json({
       ok: true,
       codigo_corregido: codigo,
       progresion,
       analisis,
       apto: analisis.puntuacion_calidad >= UMBRAL,
+      cambios,
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

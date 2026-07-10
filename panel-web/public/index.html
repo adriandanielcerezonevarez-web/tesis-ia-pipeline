@@ -94,7 +94,7 @@
     <button class="nav-item active" onclick="ver('analizar')">Analizar código</button>
     <button class="nav-item" onclick="ver('acerca')">Acerca de</button>
   </nav>
-  <div class="sidebar-footer">Modelo Llama 3 (open source)<br/>Arce-Cerezo · Tesis</div>
+  <div class="sidebar-footer">Modelo GPT-OSS 120B (open source)<br/>Arce-Cerezo · Tesis</div>
 </aside>
 
 <main>
@@ -130,7 +130,7 @@
         <p>El usuario sube su código y la app aplica un proceso CI/CD con IA: analiza la calidad en 7 dimensiones,
         entrega un reporte descargable en PDF, y según la puntuación permite desplegar automáticamente
         (integrándose al sistema del usuario) o corregir el código —manualmente o con la IA— hasta que sea apto.</p>
-        <p style="margin-top:10px">Modelo: <b>Llama 3.3 70B</b> (open source). Independiente de cualquier plataforma.</p>
+        <p style="margin-top:10px">Modelo: <b>GPT-OSS 120B</b> (open source, vía Cerebras). Independiente de cualquier plataforma.</p>
       </div>
     </div>
 
@@ -196,7 +196,7 @@ async function analizar() {
   $("estado").textContent = "Listo";
 }
 
-function renderReporte(a, corregido, progresion) {
+function renderReporte(a, corregido, progresion, cambios) {
   const s = a.puntuacion_calidad;
   const apto = s >= 8;
   let dims = (a.dimensiones || []).map(d =>
@@ -224,8 +224,17 @@ function renderReporte(a, corregido, progresion) {
       </div>`;
   }
 
+  let cambiosHtml = "";
+  if (corregido && cambios && cambios.length) {
+    cambiosHtml = `<h2 style="margin-top:18px">Cambios aplicados por la IA</h2>
+      <table><tr><th>Qué se cambió</th><th>Por qué</th><th>Mejora</th></tr>` +
+      cambios.map(c => `<tr><td>${escapar(c.que||'')}</td><td>${escapar(c.porque||'')}</td><td>${escapar(c.mejora||'')}</td></tr>`).join('') +
+      `</table>`;
+  }
+
   const codeBlock = corregido ?
-    `<h2 style="margin-top:18px">Código corregido por la IA</h2>
+    `${cambiosHtml}
+     <h2 style="margin-top:18px">Código corregido por la IA</h2>
      <pre class="code" id="codeCorr">${escapar(codigoActual)}</pre>
      <div class="row"><button class="btn btn-ghost" onclick="descargarCodigo()">Descargar código corregido</button></div>` : "";
 
@@ -257,7 +266,7 @@ async function corregirIA() {
     const d = await post("/api/corregir", { codigo:codigoActual, nombre:nombreActual });
     if (!d.ok) throw new Error(d.error);
     codigoActual = d.codigo_corregido;
-    renderReporte(d.analisis, true, d.progresion);
+    renderReporte(d.analisis, true, d.progresion, d.cambios);
     if (d.apto) {
       $("estado").textContent = "Corregido y apto";
       $("resultado").insertAdjacentHTML("beforeend",
@@ -315,7 +324,7 @@ function descargarPDF() {
   let y = 18;
   doc.setFontSize(16); doc.text("Reporte de Calidad de Código - IA", 14, y); y += 8;
   doc.setFontSize(10); doc.setTextColor(120);
-  doc.text("Archivo: " + nombreActual + "  |  Modelo: Llama 3.3 70B", 14, y); y += 10;
+  doc.text("Archivo: " + nombreActual + "  |  Modelo: GPT-OSS 120B", 14, y); y += 10;
   doc.setTextColor(30); doc.setFontSize(13);
   doc.text("Puntuacion: " + a.puntuacion_calidad + "/10   Riesgo: " + a.nivel_riesgo, 14, y); y += 8;
   doc.setFontSize(10);
