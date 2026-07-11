@@ -163,7 +163,14 @@ Proporciona el análisis completo en el formato JSON especificado.
         if ini >= 0 and fin > ini:
             contenido_respuesta = contenido_respuesta[ini:fin + 1]
 
-        return json.loads(contenido_respuesta)
+        analisis = json.loads(contenido_respuesta)
+        # Aptitud por umbral numérico (>= 7), sin depender del criterio variable del modelo.
+        try:
+            score = float(analisis.get("puntuacion_calidad", 0))
+            analisis["apto_para_merge"] = score >= 7
+        except (TypeError, ValueError):
+            pass
+        return analisis
 
     except json.JSONDecodeError as e:
         return {

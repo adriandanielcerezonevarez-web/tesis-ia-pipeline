@@ -54,8 +54,8 @@ def main():
         description="Corrector iterativo de código con IA (hasta alcanzar un umbral de calidad)"
     )
     parser.add_argument("archivos", nargs="+", help="Archivos de código a corregir")
-    parser.add_argument("--umbral", "-u", type=float, default=8.0,
-                        help="Puntuación mínima objetivo (default: 8.0)")
+    parser.add_argument("--umbral", "-u", type=float, default=7.0,
+                        help="Puntuación mínima objetivo (default: 7.0)")
     parser.add_argument("--max-iter", "-m", type=int, default=4,
                         help="Máximo de correcciones por archivo (default: 4)")
     args = parser.parse_args()
