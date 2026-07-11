@@ -31,7 +31,7 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 # ─────────────────────────────────────────────────────────────
 
 MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
-TEMPERATURA = 0.2                         # Baja temperatura = respuestas más consistentes
+TEMPERATURA = 0                           # Temperatura 0 = máxima consistencia (igual que el validador)
 MAX_TOKENS = 8000                         # Amplio: gpt-oss "razona" antes de responder
 
 # Criterios de análisis que evalúa la IA
@@ -50,10 +50,20 @@ DIMENSIONES_ANALISIS = [
 # ─────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """
-Eres un experto en calidad de software y revisión de código. Tu función dentro de un
-pipeline CI/CD es analizar fragmentos de código fuente y generar reportes estructurados
-sobre su calidad, detectando no solo errores técnicos sino también problemas de diseño,
-malas prácticas y oportunidades de mejora.
+Eres un revisor experto de calidad de software. Analizas código con RIGOR y CONSISTENCIA.
+
+CONTEXTO IMPORTANTE (respétalo siempre):
+El código que recibes es parte de un proyecto real con varios archivos (HTML, CSS, JavaScript,
+configuración) que NO ves completos. Por lo tanto:
+- NO inventes ni asumas la existencia de clases, módulos, variables o funciones que no aparecen
+  literalmente en el código mostrado. No alucines una arquitectura que no está.
+- NO penalices ni recomiendes separar el código en archivos nuevos ni mover estilos/scripts a otros
+  archivos: el proyecto ya tiene sus archivos y eso rompería el diseño y las referencias existentes.
+- Evalúa el archivo TAL COMO ESTÁ, como una pieza que funciona junto a los demás archivos del proyecto.
+
+PUNTUACIÓN (rúbrica fija para que sea consistente):
+- 9-10 excelente | 7-8 bueno | 5-6 aceptable | 3-4 deficiente | 1-2 crítico.
+- "puntuacion_calidad" = promedio de las 7 dimensiones, redondeado a 1 decimal.
 
 Analiza el código proporcionado evaluando las siguientes dimensiones:
 
@@ -164,10 +174,20 @@ Proporciona el análisis completo en el formato JSON especificado.
             contenido_respuesta = contenido_respuesta[ini:fin + 1]
 
         analisis = json.loads(contenido_respuesta)
+        # Recalcular la puntuación como promedio de las 7 dimensiones (coherencia con el validador).
+        dims = analisis.get("dimensiones", [])
+        if dims:
+            try:
+                prom = round(sum(float(d.get("puntuacion", 0)) for d in dims) / len(dims), 1)
+                analisis["puntuacion_calidad"] = prom
+                analisis["nivel_riesgo"] = (
+                    "BAJO" if prom >= 8 else "MEDIO" if prom >= 6 else "ALTO" if prom >= 4 else "CRÍTICO"
+                )
+            except (TypeError, ValueError):
+                pass
         # Aptitud por umbral numérico (>= 7), sin depender del criterio variable del modelo.
         try:
-            score = float(analisis.get("puntuacion_calidad", 0))
-            analisis["apto_para_merge"] = score >= 7
+            analisis["apto_para_merge"] = float(analisis.get("puntuacion_calidad", 0)) >= 7
         except (TypeError, ValueError):
             pass
         return analisis

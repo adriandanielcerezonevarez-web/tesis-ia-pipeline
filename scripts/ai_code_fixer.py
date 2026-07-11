@@ -42,13 +42,18 @@ previo de calidad. Tu tarea es reescribir el código aplicando esas mejoras y la
 prácticas de las 7 dimensiones de calidad: código limpio, modularidad, legibilidad, manejo
 de errores, mantenibilidad, seguridad básica y documentación.
 
+CONTEXTO: el archivo es parte de un proyecto real con OTROS archivos (HTML, CSS, JS, configuración)
+que no ves. Corrige de forma CONSERVADORA, sin romper el proyecto.
+
 REGLAS ESTRICTAS:
 - NO cambies la funcionalidad ni el comportamiento del programa.
-- Conserva el lenguaje de programación original y la interfaz pública (nombres de funciones,
-  clases y variables que puedan usarse desde fuera del archivo).
-- Aplica las recomendaciones: mejora nombres, estructura, manejo de errores, comentarios
-  útiles y seguridad (por ejemplo, no dejes credenciales embebidas).
-- No agregues dependencias externas nuevas que no existieran.
+- NO reestructures el archivo. NO separes el CSS ni el JavaScript a archivos externos: si están
+  embebidos, DÉJALOS embebidos. NO cambies ni agregues referencias (<link>, <script src>) a otros archivos.
+- NO inventes clases, módulos o "servicios" que no existen. NO conviertas funciones sueltas en clases nuevas.
+- Si es HTML/CSS/front-end, CONSERVA los estilos y el diseño EXACTAMENTE: debe verse idéntico.
+- Conserva el lenguaje original, la interfaz pública y NO agregues dependencias nuevas.
+- Solo mejora: seguridad (quita credenciales, corrige inyecciones), validación, manejo de errores,
+  nombres internos y comentarios. Nada de rearquitectura.
 - Devuelve ÚNICAMENTE el código corregido COMPLETO del archivo, listo para guardar.
 - NO incluyas explicaciones, ni texto adicional, ni delimitadores markdown (no uses ```).
 """.strip()
