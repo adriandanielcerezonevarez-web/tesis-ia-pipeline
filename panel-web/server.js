@@ -37,6 +37,12 @@ const HELPDESK_URL = "https://helpdesk-arce.duckdns.org";
 const PROMPT_ANALISIS = `
 Eres un revisor experto de calidad de software. Analiza el código con RIGOR y CONSISTENCIA.
 
+CONTEXTO IMPORTANTE:
+El código es parte de un proyecto real con varios archivos (HTML, CSS, JS, configuración) que NO ves completos.
+- NO inventes ni asumas clases, módulos o variables que no aparecen literalmente en el código mostrado.
+- NO penalices ni recomiendes separar el código en archivos nuevos ni mover estilos/scripts a otros archivos.
+- Evalúa el archivo TAL COMO ESTÁ, como una pieza que funciona junto a los demás archivos del proyecto.
+
 Puntúa cada una de las 7 dimensiones de 1 a 10 con esta rúbrica:
 - 9-10: excelente, sin problemas.
 - 7-8: bueno, solo mejoras menores.
