@@ -14,6 +14,7 @@ Autor: Adrian Daniel Cerezo Nevarez
 
 import os
 import sys
+import re
 import json
 import argparse
 from pathlib import Path
@@ -36,26 +37,25 @@ TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras
 MAX_TOKENS = 12000                        # Amplio: gpt-oss razona y devuelve el archivo completo
 
 SYSTEM_PROMPT = """
-Eres un ingeniero de software experto en refactorización y calidad de código. Recibes un
-archivo de código fuente y una lista de recomendaciones de mejora detectadas por un análisis
-previo de calidad. Tu tarea es reescribir el código aplicando esas mejoras y las buenas
-prácticas de las 7 dimensiones de calidad: código limpio, modularidad, legibilidad, manejo
-de errores, mantenibilidad, seguridad básica y documentación.
+Eres un ingeniero experto en calidad de código. Recibes un archivo y recomendaciones de mejora.
+NO reescribas el archivo completo. Devuelve SOLO cambios puntuales (quirúrgicos) en bloques con
+este formato EXACTO:
 
-CONTEXTO: el archivo es parte de un proyecto real con OTROS archivos (HTML, CSS, JS, configuración)
-que no ves. Corrige de forma CONSERVADORA, sin romper el proyecto.
+@@BUSCAR@@
+<fragmento EXACTO del código original, copiado carácter por carácter, con varias líneas de
+contexto para que sea único e inconfundible dentro del archivo>
+@@REEMPLAZAR@@
+<ese mismo fragmento, pero corregido>
+@@FIN@@
 
-REGLAS ESTRICTAS:
-- NO cambies la funcionalidad ni el comportamiento del programa.
-- NO reestructures el archivo. NO separes el CSS ni el JavaScript a archivos externos: si están
-  embebidos, DÉJALOS embebidos. NO cambies ni agregues referencias (<link>, <script src>) a otros archivos.
-- NO inventes clases, módulos o "servicios" que no existen. NO conviertas funciones sueltas en clases nuevas.
-- Si es HTML/CSS/front-end, CONSERVA los estilos y el diseño EXACTAMENTE: debe verse idéntico.
-- Conserva el lenguaje original, la interfaz pública y NO agregues dependencias nuevas.
-- Solo mejora: seguridad (quita credenciales, corrige inyecciones), validación, manejo de errores,
-  nombres internos y comentarios. Nada de rearquitectura.
-- Devuelve ÚNICAMENTE el código corregido COMPLETO del archivo, listo para guardar.
-- NO incluyas explicaciones, ni texto adicional, ni delimitadores markdown (no uses ```).
+REGLAS OBLIGATORIAS:
+- El texto entre @@BUSCAR@@ y @@REEMPLAZAR@@ debe existir EXACTAMENTE en el código (misma
+  indentación, mismas comillas, mismos espacios). Cópialo literal; si no coincide, se descarta.
+- Haz cambios MÍNIMOS: seguridad (credenciales, inyección), validación de datos y manejo de errores.
+- NO toques el diseño, estilos, HTML de presentación ni la estructura salvo que sea imprescindible.
+- NO inventes clases, NO separes el código a otros archivos, NO cambies referencias (<link>, <script src>).
+- Máximo 6 bloques, los más importantes. Si no hay cambios realmente seguros, no devuelvas ningún bloque.
+- No escribas nada fuera de los bloques.
 """.strip()
 
 
@@ -106,6 +106,19 @@ def cargar_recomendaciones(ruta_reporte: str) -> dict:
     return recomendaciones_por_archivo
 
 
+def aplicar_parches(codigo, respuesta):
+    """
+    Aplica solo los bloques @@BUSCAR@@/@@REEMPLAZAR@@ que coinciden EXACTAMENTE con el código.
+    El resto del archivo queda intacto; los bloques que no encajan se descartan.
+    """
+    patron = re.compile(r"@@BUSCAR@@\r?\n(.*?)\r?\n@@REEMPLAZAR@@\r?\n(.*?)\r?\n@@FIN@@", re.DOTALL)
+    nuevo = codigo
+    for buscar, reemplazar in patron.findall(respuesta):
+        if buscar and buscar in nuevo:
+            nuevo = nuevo.replace(buscar, reemplazar, 1)
+    return nuevo
+
+
 def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
                     extension: str, recomendaciones: str) -> str:
     """
@@ -146,17 +159,8 @@ Devuelve únicamente el código corregido completo, sin explicaciones ni markdow
             reasoning_effort="low",
         )
         contenido = respuesta.choices[0].message.content.strip()
-
-        # Quitar delimitadores markdown si el modelo los agregó igualmente
-        if contenido.startswith("```"):
-            lineas = contenido.split("\n")
-            if lineas[0].startswith("```"):
-                lineas = lineas[1:]
-            if lineas and lineas[-1].strip() == "```":
-                lineas = lineas[:-1]
-            contenido = "\n".join(lineas)
-
-        return contenido.strip() + "\n"
+        # Aplicar solo los cambios puntuales (parches) que coincidan exactamente con el código.
+        return aplicar_parches(codigo, contenido)
 
     except Exception as e:
         print(f"  [ERROR] Falló la corrección de {nombre_archivo}: {e}")
