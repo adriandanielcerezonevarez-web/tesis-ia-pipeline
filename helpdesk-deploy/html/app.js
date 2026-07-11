@@ -1,6 +1,6 @@
 (() => {
   // -------------------------------------------------------------------------
-  // Configuration
+  // Configuration (constants)
   // -------------------------------------------------------------------------
   const CONFIG = {
     SESSION_KEY: 'helpdesk_session',
@@ -16,7 +16,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // State (encapsulated)
+  // Application state (private)
   // -------------------------------------------------------------------------
   const state = {
     session: null,
@@ -31,30 +31,35 @@
   };
 
   // -------------------------------------------------------------------------
-  // Utility Functions
+  // Utility functions
   // -------------------------------------------------------------------------
-  const escHtml = (str) =>
-    String(str || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+  /**
+   * Sanitiza y escapa contenido HTML usando DOMPurify.
+   * @param {string} str
+   * @returns {string}
+   */
+  const sanitizeHtml = (str) => (window.DOMPurify ? DOMPurify.sanitize(String(str)) : String(str));
 
+  /**
+   * Elimina caracteres potencialmente peligrosos de la entrada del usuario.
+   * @param {string} value
+   * @returns {string}
+   */
   const sanitizeInput = (value) => value.replace(/[<>]/g, '');
 
-  const trySet = (id, val) => {
+  const setElementText = (id, text) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = val;
+    if (el) el.textContent = text;
   };
 
-  const tryVal = (id, val) => {
+  const setElementValue = (id, value) => {
     const el = document.getElementById(id);
-    if (el) el.value = val;
+    if (el) el.value = value;
   };
 
-  const tryWidth = (id, val) => {
+  const setElementWidth = (id, width) => {
     const el = document.getElementById(id);
-    if (el) el.style.width = val;
+    if (el) el.style.width = width;
   };
 
   const formatDate = (iso) => {
@@ -77,6 +82,13 @@
     });
   };
 
+  const createBadge = (text, type) => {
+    const span = document.createElement('span');
+    span.className = `badge ${type}`;
+    span.textContent = text;
+    return span.outerHTML;
+  };
+
   const statusBadgeHtml = (status) => {
     const map = {
       Abierto: 'badge-abierto',
@@ -84,11 +96,7 @@
       Resuelto: 'badge-resuelto',
       Cerrado: 'badge-cerrado'
     };
-    const cls = map[status] || '';
-    const span = document.createElement('span');
-    span.className = `badge ${cls}`;
-    span.textContent = status;
-    return span.outerHTML;
+    return createBadge(status, map[status] || '');
   };
 
   const priorityBadgeHtml = (priority) => {
@@ -98,29 +106,28 @@
       Media: 'badge-media',
       Baja: 'badge-baja'
     };
-    const cls = map[priority] || '';
-    const span = document.createElement('span');
-    span.className = `badge ${cls}`;
-    span.textContent = priority;
-    return span.outerHTML;
+    return createBadge(priority, map[priority] || '');
   };
 
   const categoryEmoji = () => '';
 
   // -------------------------------------------------------------------------
-  // Error handling
+  // Centralized error handling
   // -------------------------------------------------------------------------
   const handleError = (err, context = '') => {
     console.error(`Error${context ? ` (${context})` : ''}:`, err);
-    showToast(`Error${context ? ` (${context})` : ''}: ${err.message || err}`, 'error');
+    ui.showToast(`Error${context ? ` (${context})` : ''}: ${err.message || err}`, 'error');
   };
 
   // -------------------------------------------------------------------------
-  // Firebase Service
+  // Data layer abstraction
   // -------------------------------------------------------------------------
-  const firebaseService = {
-    init() {
-      if (typeof FIREBASE_CONFIGURED === 'undefined' || !FIREBASE_CONFIGURED) return;
+  const dataService = {
+    async init() {
+      if (typeof FIREBASE_CONFIGURED === 'undefined' || !FIREBASE_CONFIGURED) {
+        this.useFallback();
+        return;
+      }
       try {
         if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
         state.db = firebase.firestore();
@@ -128,12 +135,17 @@
         console.log('Firestore conectado');
       } catch (err) {
         handleError(err, 'Firebase init');
-        state.useFirebase = false;
-        state.db = null;
+        this.useFallback();
       }
     },
 
+    useFallback() {
+      state.useFirebase = false;
+      state.db = null;
+    },
+
     async nextTicketId() {
+      if (!state.useFirebase) throw new Error('Firebase not initialized');
       const counterRef = state.db.collection('meta').doc('counter');
       return state.db.runTransaction(async (t) => {
         const snap = await t.get(counterRef);
@@ -144,11 +156,13 @@
     },
 
     async loadUsers() {
+      if (!state.useFirebase) throw new Error('Firebase not initialized');
       const snap = await state.db.collection('users').get();
       return snap.docs.map((d) => d.data());
     },
 
     async subscribeTickets(callback) {
+      if (!state.useFirebase) throw new Error('Firebase not initialized');
       state.unsubscribeTickets = state.db
         .collection('tickets')
         .orderBy('createdAt', 'desc')
@@ -162,16 +176,14 @@
     },
 
     async loadInitialTickets() {
-      const snap = await state.db
-        .collection('tickets')
-        .orderBy('createdAt', 'desc')
-        .get();
+      if (!state.useFirebase) throw new Error('Firebase not initialized');
+      const snap = await state.db.collection('tickets').orderBy('createdAt', 'desc').get();
       state.tickets = snap.docs.map((d) => d.data());
     }
   };
 
   // -------------------------------------------------------------------------
-  // Local Storage Service
+  // Local storage fallback service
   // -------------------------------------------------------------------------
   const localStorageService = {
     load(key) {
@@ -195,7 +207,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Authentication Module
+  // Authentication module
   // -------------------------------------------------------------------------
   const auth = {
     init() {
@@ -222,10 +234,7 @@
         userAvatar: state.session.name.charAt(0).toUpperCase(),
         topbarRoleBadge: state.session.role === 'admin' ? 'Admin' : 'Usuario'
       };
-      Object.entries(map).forEach(([id, text]) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = text;
-      });
+      Object.entries(map).forEach(([id, text]) => setElementText(id, text));
       return true;
     },
 
@@ -237,7 +246,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // UI Module
+  // UI module
   // -------------------------------------------------------------------------
   const ui = {
     updateConnectionBadge(online) {
@@ -279,8 +288,8 @@
       if (sec) sec.classList.add('active');
 
       const meta = SECTION_META[name] || { title: name, subtitle: '' };
-      trySet('pageTitle', meta.title);
-      trySet('pageSubtitle', meta.subtitle);
+      setElementText('pageTitle', meta.title);
+      setElementText('pageSubtitle', meta.subtitle);
 
       const sbox = document.getElementById('searchBox');
       if (sbox) sbox.style.display = ['tickets', 'mytickets'].includes(name) ? 'flex' : 'none';
@@ -328,7 +337,7 @@
       }
     },
 
-    closeModalById(id) {
+    closeModal(id) {
       const el = document.getElementById(id);
       if (el) {
         el.classList.remove('open');
@@ -337,12 +346,12 @@
     },
 
     closeTicketModal() {
-      this.closeModalById('ticketModal');
+      this.closeModal('ticketModal');
     },
 
     closeConfirmModal(e) {
       if (e && e.target !== e.currentTarget) return;
-      this.closeModalById('confirmModal');
+      this.closeModal('confirmModal');
       state.pendingDeleteId = null;
       const btn = document.getElementById('confirmDeleteBtn');
       if (btn) btn.onclick = executeDelete;
@@ -360,7 +369,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Data Seeding
+  // Data seeding (demo)
   // -------------------------------------------------------------------------
   const seedDemoData = async () => {
     if (state.tickets.length) return;
@@ -397,7 +406,7 @@
       try {
         const batch = state.db.batch();
         for (const d of demos) {
-          const id = await firebaseService.nextTicketId();
+          const id = await dataService.nextTicketId();
           batch.set(state.db.collection('tickets').doc(id), { id, ...d });
           state.tickets.push({ id, ...d });
         }
@@ -415,7 +424,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Fallback to Local Storage
+  // Fallback to local storage
   // -------------------------------------------------------------------------
   const fallbackToLocal = () => {
     ui.updateConnectionBadge(false);
@@ -425,7 +434,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Rendering Functions
+  // Rendering helpers
   // -------------------------------------------------------------------------
   const renderAll = () => {
     if (state.session.role === 'admin') {
@@ -460,10 +469,10 @@
     const progress = state.tickets.filter((t) => t.status === 'En Progreso').length;
     const closed = state.tickets.filter((t) => ['Resuelto', 'Cerrado'].includes(t.status)).length;
 
-    trySet('stat-total', total);
-    trySet('stat-open', open);
-    trySet('stat-progress', progress);
-    trySet('stat-closed', closed);
+    setElementText('stat-total', total);
+    setElementText('stat-open', open);
+    setElementText('stat-progress', progress);
+    setElementText('stat-closed', closed);
 
     const priorityCounts = { Crítica: 0, Alta: 0, Media: 0, Baja: 0 };
     state.tickets.forEach((t) => {
@@ -471,8 +480,8 @@
     });
     const maxP = Math.max(...Object.values(priorityCounts), 1);
     ['Crítica', 'Alta', 'Media', 'Baja'].forEach((p) => {
-      tryWidth(`bar-${p.toLowerCase()}`, `${(priorityCounts[p] / maxP) * 100}%`);
-      trySet(`count-${p.toLowerCase()}`, priorityCounts[p]);
+      setElementWidth(`bar-${p.toLowerCase()}`, `${(priorityCounts[p] / maxP) * 100}%`);
+      setElementText(`count-${p.toLowerCase()}`, priorityCounts[p]);
     });
 
     const catCounts = {};
@@ -486,7 +495,7 @@
         ? sorted
             .map(
               ([c, n]) =>
-                `<div class="category-stat-item"><span class="category-stat-name">${escHtml(c)}</span><span class="category-stat-count">${n}</span></div>`
+                `<div class="category-stat-item"><span class="category-stat-name">${sanitizeHtml(c)}</span><span class="category-stat-count">${n}</span></div>`
             )
             .join('')
         : '<div class="empty-state-small">Sin datos</div>';
@@ -501,7 +510,7 @@
         ? recent
             .map(
               (t) =>
-                `<div class="recent-ticket-item" onclick="openTicketModal('${t.id}')"><span class="recent-ticket-id">${t.id}</span><span class="recent-ticket-title">${escHtml(t.title)}</span><span class="recent-ticket-meta">${statusBadgeHtml(t.status)}</span></div>`
+                `<div class="recent-ticket-item" onclick="openTicketModal('${t.id}')"><span class="recent-ticket-id">${t.id}</span><span class="recent-ticket-title">${sanitizeHtml(t.title)}</span><span class="recent-ticket-meta">${statusBadgeHtml(t.status)}</span></div>`
             )
             .join('')
         : '<div class="empty-state-small">No hay tickets</div>';
@@ -527,12 +536,12 @@
           (t) => `
         <tr onclick="openTicketModal('${t.id}')">
           <td class="ticket-id-cell">${t.id}</td>
-          <td class="ticket-title-cell" title="${escHtml(t.title)}">${escHtml(t.title)}</td>
-          <td><span class="badge badge-category">${categoryEmoji(t.category)} ${escHtml(t.category)}</span></td>
+          <td class="ticket-title-cell" title="${sanitizeHtml(t.title)}">${sanitizeHtml(t.title)}</td>
+          <td><span class="badge badge-category">${categoryEmoji(t.category)} ${sanitizeHtml(t.category)}</span></td>
           <td>${priorityBadgeHtml(t.priority)}</td>
           <td>${statusBadgeHtml(t.status)}</td>
-          <td style="color:var(--text-secondary)">${escHtml(t.assigned || '—')}</td>
-          <td style="color:var(--text-secondary)">${escHtml(t.requester || '—')}</td>
+          <td style="color:var(--text-secondary)">${sanitizeHtml(t.assigned || '—')}</td>
+          <td style="color:var(--text-secondary)">${sanitizeHtml(t.requester || '—')}</td>
           <td style="color:var(--text-muted);font-size:12px;">${formatDate(t.createdAt)}</td>
           <td onclick="event.stopPropagation()">
             <div class="action-buttons">
@@ -553,11 +562,11 @@
     if (state.session.role !== 'user') return;
     const myTickets = state.tickets.filter((t) => t.requesterId === state.session.userId);
 
-    trySet('bannerName', `Hola, ${state.session.name.split(' ')[0]}`);
-    trySet('ustat-total', myTickets.length);
-    trySet('ustat-open', myTickets.filter((t) => t.status === 'Abierto').length);
-    trySet('ustat-progress', myTickets.filter((t) => t.status === 'En Progreso').length);
-    trySet(
+    setElementText('bannerName', `Hola, ${state.session.name.split(' ')[0]}`);
+    setElementText('ustat-total', myTickets.length);
+    setElementText('ustat-open', myTickets.filter((t) => t.status === 'Abierto').length);
+    setElementText('ustat-progress', myTickets.filter((t) => t.status === 'En Progreso').length);
+    setElementText(
       'ustat-closed',
       myTickets.filter((t) => ['Resuelto', 'Cerrado'].includes(t.status)).length
     );
@@ -590,8 +599,8 @@
           (t) => `
         <tr onclick="openTicketModal('${t.id}')">
           <td class="ticket-id-cell">${t.id}</td>
-          <td class="ticket-title-cell" title="${escHtml(t.title)}">${escHtml(t.title)}</td>
-          <td><span class="badge badge-category">${categoryEmoji(t.category)} ${escHtml(t.category)}</span></td>
+          <td class="ticket-title-cell" title="${sanitizeHtml(t.title)}">${sanitizeHtml(t.title)}</td>
+          <td><span class="badge badge-category">${categoryEmoji(t.category)} ${sanitizeHtml(t.category)}</span></td>
           <td>${priorityBadgeHtml(t.priority)}</td>
           <td>${statusBadgeHtml(t.status)}</td>
           <td style="color:var(--text-muted);font-size:12px;">${formatDate(t.createdAt)}</td>
@@ -645,7 +654,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Ticket Modal
+  // Ticket modal
   // -------------------------------------------------------------------------
   const openTicketModal = (id) => {
     const t = state.tickets.find((x) => x.id === id);
@@ -655,26 +664,26 @@
       return;
     }
 
-    trySet('modalId', t.id);
-    trySet('modalTitle', t.title);
+    setElementText('modalId', t.id);
+    setElementText('modalTitle', t.title);
     document.getElementById('modalBadges').innerHTML = `
-      ${statusBadgeHtml(t.status)} ${priorityBadgeHtml(t.priority)} <span class="badge badge-category">${categoryEmoji(t.category)} ${escHtml(t.category)}</span>
+      ${statusBadgeHtml(t.status)} ${priorityBadgeHtml(t.priority)} <span class="badge badge-category">${categoryEmoji(t.category)} ${sanitizeHtml(t.category)}</span>
     `;
 
     let notesHtml = '';
     if (state.session.role === 'admin' && t.notes) {
-      notesHtml = `<div class="modal-notes-label">Notas internas (solo admin)</div><div class="modal-notas">${escHtml(t.notes)}</div>`;
+      notesHtml = `<div class="modal-notes-label">Notas internas (solo admin)</div><div class="modal-notas">${sanitizeHtml(t.notes)}</div>`;
     }
 
     document.getElementById('modalBody').innerHTML = `
       <div class="modal-detail-grid">
-        <div class="modal-detail-item"><div class="modal-detail-label">Solicitante</div><div class="modal-detail-value">${escHtml(t.requester || '—')}</div></div>
-        <div class="modal-detail-item"><div class="modal-detail-label">Asignado a</div><div class="modal-detail-value">${escHtml(t.assigned || '—')}</div></div>
+        <div class="modal-detail-item"><div class="modal-detail-label">Solicitante</div><div class="modal-detail-value">${sanitizeHtml(t.requester || '—')}</div></div>
+        <div class="modal-detail-item"><div class="modal-detail-label">Asignado a</div><div class="modal-detail-value">${sanitizeHtml(t.assigned || '—')}</div></div>
         ${
           state.session.role === 'admin'
             ? `<div class="modal-detail-item"><div class="modal-detail-label">Email</div><div class="modal-detail-value">${
                 t.email
-                  ? `<a href="mailto:${escHtml(t.email)}" style="color:var(--accent-light)">${escHtml(t.email)}</a>`
+                  ? `<a href="mailto:${sanitizeHtml(t.email)}" style="color:var(--accent-light)">${sanitizeHtml(t.email)}</a>`
                   : '—'
               }</div></div>`
             : ''
@@ -682,7 +691,7 @@
         <div class="modal-detail-item"><div class="modal-detail-label">Creado</div><div class="modal-detail-value">${formatDateFull(t.createdAt)}</div></div>
       </div>
       <div class="modal-detail-label" style="margin-bottom:8px">Descripción</div>
-      <div class="modal-description">${escHtml(t.description)}</div>
+      <div class="modal-description">${sanitizeHtml(t.description)}</div>
       ${notesHtml}
     `;
 
@@ -709,14 +718,14 @@
   };
 
   // -------------------------------------------------------------------------
-  // Ticket Form
+  // Ticket form handling
   // -------------------------------------------------------------------------
   const resetForm = () => {
     state.editingId = null;
     const form = document.getElementById('ticketForm');
     if (form) form.reset();
 
-    trySet('ticketId', '');
+    setElementText('ticketId', '');
     const statusEl = document.getElementById('ticketStatus');
     if (statusEl) statusEl.value = 'Abierto';
 
@@ -733,16 +742,16 @@
       }
     }
 
-    trySet('formTitle', 'Crear Nuevo Ticket');
+    setElementText('formTitle', 'Crear Nuevo Ticket');
     const badge = document.getElementById('formIdBadge');
     if (badge) badge.style.display = 'none';
-    trySet('charCount', '0 / 2000');
+    setElementText('charCount', '0 / 2000');
 
     const submitBtn = document.getElementById('submitBtn');
     if (submitBtn) submitBtn.textContent = 'Guardar Ticket';
 
-    trySet('pageTitle', 'Nuevo Ticket');
-    trySet('pageSubtitle', 'Crear un nuevo ticket de soporte');
+    setElementText('pageTitle', 'Nuevo Ticket');
+    setElementText('pageSubtitle', 'Crear un nuevo ticket de soporte');
   };
 
   const editTicket = (id) => {
@@ -754,26 +763,26 @@
     }
 
     state.editingId = id;
-    tryVal('ticketId', t.id);
-    tryVal('ticketTitle', t.title);
-    tryVal('ticketCategory', t.category);
-    tryVal('ticketPriority', t.priority);
-    tryVal('ticketStatus', t.status);
-    tryVal('ticketAssigned', t.assigned || '');
-    tryVal('ticketRequester', t.requester);
-    tryVal('ticketEmail', t.email || '');
-    tryVal('ticketDescription', t.description);
-    tryVal('ticketNotes', t.notes || '');
-    trySet('charCount', `${t.description.length} / 2000`);
+    setElementValue('ticketId', t.id);
+    setElementValue('ticketTitle', t.title);
+    setElementValue('ticketCategory', t.category);
+    setElementValue('ticketPriority', t.priority);
+    setElementValue('ticketStatus', t.status);
+    setElementValue('ticketAssigned', t.assigned || '');
+    setElementValue('ticketRequester', t.requester);
+    setElementValue('ticketEmail', t.email || '');
+    setElementValue('ticketDescription', t.description);
+    setElementValue('ticketNotes', t.notes || '');
+    setElementText('charCount', `${t.description.length} / 2000`);
 
-    trySet('formTitle', 'Editar Ticket');
+    setElementText('formTitle', 'Editar Ticket');
     const badge = document.getElementById('formIdBadge');
     if (badge) {
       badge.textContent = t.id;
       badge.style.display = 'inline-block';
     }
-    trySet('pageTitle', `Editar ${t.id}`);
-    trySet('pageSubtitle', t.title);
+    setElementText('pageTitle', `Editar ${t.id}`);
+    setElementText('pageSubtitle', t.title);
 
     ui.showSection('create');
   };
@@ -802,7 +811,7 @@
           await state.db.collection('tickets').doc(state.editingId).update(updateData);
           ui.showToast('Ticket actualizado', 'success');
         } else {
-          const id = await firebaseService.nextTicketId();
+          const id = await dataService.nextTicketId();
           const newTicket = {
             id,
             title,
@@ -824,13 +833,7 @@
         if (state.editingId) {
           const idx = state.tickets.findIndex((t) => t.id === state.editingId);
           if (idx !== -1) {
-            const base = {
-              title,
-              category,
-              priority,
-              description,
-              updatedAt: new Date().toISOString()
-            };
+            const base = { title, category, priority, description, updatedAt: new Date().toISOString() };
             if (state.session.role === 'admin') {
               Object.assign(state.tickets[idx], {
                 ...base,
@@ -882,7 +885,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Technician Assignment
+  // Technician assignment
   // -------------------------------------------------------------------------
   const asignarTecnico = (id) => {
     if (state.session.role !== 'admin') {
@@ -948,7 +951,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Delete Ticket
+  // Delete ticket workflow
   // -------------------------------------------------------------------------
   const confirmDelete = (id) => {
     if (state.session.role !== 'admin') return;
@@ -975,7 +978,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Reports
+  // Reports rendering
   // -------------------------------------------------------------------------
   const renderReports = () => {
     if (state.session.role !== 'admin') return;
@@ -1006,7 +1009,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // Export & Download
+  // Export / download utilities
   // -------------------------------------------------------------------------
   const exportJSON = () => {
     const data = JSON.stringify({ tickets: state.tickets, users: state.users }, null, 2);
@@ -1065,7 +1068,7 @@
   };
 
   // -------------------------------------------------------------------------
-  // User Management
+  // User management
   // -------------------------------------------------------------------------
   const renderUsersList = () => {
     if (state.session.role !== 'admin') return;
@@ -1075,9 +1078,9 @@
       .map(
         (u) => `
       <tr>
-        <td style="font-weight:600">${escHtml(u.username)}</td>
-        <td>${escHtml(u.name)}</td>
-        <td style="color:var(--text-secondary)">${escHtml(u.email || '—')}</td>
+        <td style="font-weight:600">${sanitizeHtml(u.username)}</td>
+        <td>${sanitizeHtml(u.name)}</td>
+        <td style="color:var(--text-secondary)">${sanitizeHtml(u.email || '—')}</td>
         <td>${u.role === 'admin' ? '<span class="badge badge-abierto">admin</span>' : '<span class="badge">usuario</span>'}</td>
         <td style="color:var(--text-muted);font-size:12px">${formatDate(u.createdAt)}</td>
         <td>
@@ -1091,13 +1094,13 @@
   };
 
   const openUserModal = () => {
-    tryVal('userEditId', '');
-    tryVal('userUsername', '');
-    tryVal('userName', '');
-    tryVal('userEmailField', '');
-    tryVal('userPassword', '');
-    tryVal('userRole', 'user');
-    trySet('userModalTitle', 'Nuevo Usuario');
+    setElementValue('userEditId', '');
+    setElementValue('userUsername', '');
+    setElementValue('userName', '');
+    setElementValue('userEmailField', '');
+    setElementValue('userPassword', '');
+    setElementValue('userRole', 'user');
+    setElementText('userModalTitle', 'Nuevo Usuario');
     const hint = document.getElementById('pwdHint');
     if (hint) hint.style.display = 'none';
     const req = document.getElementById('pwdReq');
@@ -1109,13 +1112,13 @@
   const editUser = (id) => {
     const u = state.users.find((x) => x.id === id);
     if (!u) return;
-    tryVal('userEditId', u.id);
-    tryVal('userUsername', u.username);
-    tryVal('userName', u.name);
-    tryVal('userEmailField', u.email || '');
-    tryVal('userRole', u.role);
-    tryVal('userPassword', '');
-    trySet('userModalTitle', 'Editar Usuario');
+    setElementValue('userEditId', u.id);
+    setElementValue('userUsername', u.username);
+    setElementValue('userName', u.name);
+    setElementValue('userEmailField', u.email || '');
+    setElementValue('userRole', u.role);
+    setElementValue('userPassword', '');
+    setElementText('userModalTitle', 'Editar Usuario');
 
     const hint = document.getElementById('pwdHint');
     if (hint) hint.style.display = 'block';
@@ -1201,7 +1204,7 @@
       handleError(err, 'saveUser');
       return;
     }
-    ui.closeModalById('userModal');
+    ui.closeModal('userModal');
     renderUsersList();
   };
 
@@ -1227,20 +1230,20 @@
   };
 
   // -------------------------------------------------------------------------
-  // Initialization
+  // Application initialization
   // -------------------------------------------------------------------------
   if (!window.location.pathname.endsWith('login.html')) {
     document.addEventListener('DOMContentLoaded', async () => {
       if (!auth.init()) return;
 
-      firebaseService.init();
+      await dataService.init();
 
       if (state.useFirebase) {
         try {
-          state.users = await firebaseService.loadUsers();
+          state.users = await dataService.loadUsers();
           ui.updateConnectionBadge(true);
-          await firebaseService.subscribeTickets(renderAll);
-          await firebaseService.loadInitialTickets();
+          await dataService.subscribeTickets(renderAll);
+          await dataService.loadInitialTickets();
           if (state.tickets.length === 0) await seedDemoData();
         } catch (err) {
           handleError(err, 'Bootstrap Firebase');
@@ -1254,13 +1257,12 @@
       ui.setupSidebar();
       ui.setupCharCounter();
 
-      if (state.session.role === 'admin') ui.showSection('dashboard');
-      else ui.showSection('mytickets');
+      ui.showSection(state.session.role === 'admin' ? 'dashboard' : 'mytickets');
     });
   }
 
   // -------------------------------------------------------------------------
-  // Global Event Handlers (required for inline onclick)
+  // Global event handlers (required for inline onclick)
   // -------------------------------------------------------------------------
   window.openTicketModal = openTicketModal;
   window.editTicket = editTicket;
