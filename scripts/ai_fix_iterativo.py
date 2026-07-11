@@ -17,8 +17,11 @@ Autor: Adrian Daniel Cerezo Nevarez
 
 import os
 import sys
+import re
 import json
 import argparse
+import subprocess
+import tempfile
 from pathlib import Path
 
 # Permitir importar los módulos hermanos sin importar el directorio de trabajo
@@ -47,6 +50,53 @@ def construir_recomendaciones(analisis: dict) -> str:
         for r in dim.get("recomendaciones", []):
             partes.append(f"- ({dim.get('nombre', '?')}) {r}")
     return "\n".join(partes)
+
+
+def _referencias_externas(texto):
+    """Extrae referencias a archivos/recursos locales (script src, link href, import)."""
+    refs = set()
+    refs.update(re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', texto, re.I))
+    refs.update(re.findall(r'<link[^>]+href=["\']([^"\']+)["\']', texto, re.I))
+    refs.update(re.findall(r'(?:import|from)\s+["\']([^"\']+)["\']', texto))
+    # Ignorar recursos remotos (CDN) y data URIs
+    return {r for r in refs if not r.startswith(("http", "//", "data:"))}
+
+
+def validar_integridad(original, corregido, ruta):
+    """
+    Verifica que la corrección de la IA no rompa el proyecto ANTES de aplicarla.
+    Devuelve (True, "ok") si es segura, o (False, motivo) si debe descartarse.
+    """
+    # 1. No debe salir muy recortado (señal de truncamiento o rotura).
+    if len(corregido) < len(original) * 0.6:
+        return False, "el resultado salió demasiado recortado"
+
+    # 2. No debe introducir referencias a archivos locales que no existían.
+    #    (Esto es lo que rompía el HelpDesk: separar CSS/JS a archivos inexistentes.)
+    nuevas = _referencias_externas(corregido) - _referencias_externas(original)
+    if nuevas:
+        return False, f"introduce archivos que no existen: {', '.join(sorted(nuevas))}"
+
+    # 3. La sintaxis debe seguir siendo válida según el lenguaje.
+    ext = ruta.rsplit(".", 1)[-1].lower() if "." in ruta else ""
+    if ext == "py":
+        try:
+            compile(corregido, ruta, "exec")
+        except SyntaxError as e:
+            return False, f"error de sintaxis Python: {e}"
+    elif ext in ("js", "mjs"):
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+                f.write(corregido)
+                tmp = f.name
+            resultado = subprocess.run(["node", "--check", tmp], capture_output=True)
+            os.unlink(tmp)
+            if resultado.returncode != 0:
+                return False, "error de sintaxis JavaScript"
+        except FileNotFoundError:
+            pass  # node no disponible: se omite esta comprobación
+
+    return True, "ok"
 
 
 def main():
@@ -110,6 +160,13 @@ def main():
 
             if not corregido or corregido.strip() == codigo_actual.strip():
                 print(f"   = La IA no aplicó más cambios; se detiene.\n")
+                break
+
+            # VALIDADOR DE INTEGRIDAD: no aplicar la corrección si rompería el proyecto.
+            valido, motivo = validar_integridad(codigo_actual, corregido, ruta)
+            if not valido:
+                print(f"   🛡️ Corrección DESCARTADA por seguridad: {motivo}.")
+                print(f"      Se conserva la versión anterior para no romper el proyecto.\n")
                 break
 
             Path(ruta).write_text(corregido, encoding="utf-8")
