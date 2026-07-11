@@ -95,7 +95,7 @@ jobs:
         run: |
           ARCHIVOS="${{ steps.archivos.outputs.lista }}"
           echo "===== Corrección iterativa con IA (objetivo: 8/10) ====="
-          python scripts/ai_fix_iterativo.py --umbral 8 --max-iter 4 $ARCHIVOS
+          python scripts/ai_fix_iterativo.py --umbral 7 --max-iter 4 $ARCHIVOS
           echo "===== Análisis final del código corregido ====="
           python scripts/ai_code_analyzer.py --json --output reporte-despues.md $ARCHIVOS || true
 
