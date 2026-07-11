@@ -39,6 +39,78 @@ const HelpDeskApp = (function () {
   let pendingDeleteId = null;
 
   // -----------------------------------------------------------------
+  // Logger configurable (simple)
+  // -----------------------------------------------------------------
+  const logger = {
+    info: (...args) => console.info('[HelpDesk]', ...args),
+    warn: (...args) => console.warn('[HelpDesk]', ...args),
+    error: (...args) => console.error('[HelpDesk]', ...args)
+  };
+
+  // -----------------------------------------------------------------
+  // Utilidades de almacenamiento
+  // -----------------------------------------------------------------
+  function isLocalStorageAvailable() {
+    try {
+      const testKey = '__test__';
+      localStorage.setItem(testKey, '1');
+      localStorage.removeItem(testKey);
+      return true;
+    } catch (e) {
+      logger.warn('localStorage no disponible:', e);
+      return false;
+    }
+  }
+
+  function safeParse(key) {
+    try {
+      return JSON.parse(localStorage.getItem(key)) || [];
+    } catch (e) {
+      logger.warn(`Error al parsear ${key}:`, e);
+      return [];
+    }
+  }
+
+  function dbLoad() {
+    return isLocalStorageAvailable() ? safeParse(DB_KEY) : [];
+  }
+
+  function dbSave(ticketsArr) {
+    if (!isLocalStorageAvailable()) return;
+    try {
+      localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
+    } catch (e) {
+      logger.error('Error al guardar tickets en localStorage:', e);
+      showToast('Espacio insuficiente en el almacenamiento local', 'error');
+    }
+  }
+
+  function dbNextId() {
+    const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
+    const next = current + 1;
+    try {
+      localStorage.setItem(COUNTER_KEY, String(next));
+    } catch (e) {
+      logger.error('Error al actualizar contador en localStorage:', e);
+    }
+    return `TK-${String(next).padStart(4, '0')}`;
+  }
+
+  function usersLoad() {
+    return isLocalStorageAvailable() ? safeParse(USERS_KEY) : [];
+  }
+
+  function usersSave(usersArr) {
+    if (!isLocalStorageAvailable()) return;
+    try {
+      localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
+    } catch (e) {
+      logger.error('Error al guardar usuarios en localStorage:', e);
+      showToast('Espacio insuficiente en el almacenamiento local', 'error');
+    }
+  }
+
+  // -----------------------------------------------------------------
   // Inicialización de Firebase
   // -----------------------------------------------------------------
   function initFirebase() {
@@ -47,9 +119,9 @@ const HelpDeskApp = (function () {
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
       db = firebase.firestore();
       useFirebase = true;
-      console.log('firestore conectado');
+      logger.info('firestore conectado');
     } catch (err) {
-      console.warn('Firebase no disponible, se usará localStorage:', err.message);
+      logger.warn('Firebase no disponible, se usará localStorage:', err.message);
       useFirebase = false;
       db = null;
     }
@@ -81,7 +153,14 @@ const HelpDeskApp = (function () {
       }
       return false;
     }
-    session = JSON.parse(s);
+    try {
+      session = JSON.parse(s);
+    } catch (e) {
+      logger.error('Sesión corrupta, se redirige a login:', e);
+      sessionStorage.removeItem(SESSION_KEY);
+      window.location.href = 'login.html';
+      return false;
+    }
     document.body.classList.add(`role-${session.role}`);
 
     const nameEl = document.getElementById('userDisplayName');
@@ -107,63 +186,54 @@ const HelpDeskApp = (function () {
   }
 
   // -----------------------------------------------------------------
-  // Persistencia (localStorage)
-  // -----------------------------------------------------------------
-  function dbLoad() {
-    try { return JSON.parse(localStorage.getItem(DB_KEY)) || []; }
-    catch { return []; }
-  }
-
-  function dbSave(ticketsArr) {
-    localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
-  }
-
-  function dbNextId() {
-    const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
-    const next = current + 1;
-    localStorage.setItem(COUNTER_KEY, String(next));
-    return `TK-${String(next).padStart(4, '0')}`;
-  }
-
-  function usersLoad() {
-    try { return JSON.parse(localStorage.getItem(USERS_KEY)) || []; }
-    catch { return []; }
-  }
-
-  function usersSave(usersArr) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
-  }
-
-  // -----------------------------------------------------------------
   // Persistencia (Firebase)
   // -----------------------------------------------------------------
   async function fbNextId() {
     const counterRef = db.collection('meta').doc('counter');
-    try {
-      return await db.runTransaction(async t => {
-        const snap = await t.get(counterRef);
-        const next = (snap.exists ? snap.data().value : 0) + 1;
-        t.set(counterRef, { value: next });
-        return `TK-${String(next).padStart(4, '0')}`;
-      });
-    } catch (err) {
-      console.error('fbNextId error:', err);
-      throw err;
-    }
+    return await db.runTransaction(async t => {
+      const snap = await t.get(counterRef);
+      const next = (snap.exists ? snap.data().value : 0) + 1;
+      t.set(counterRef, { value: next });
+      return `TK-${String(next).padStart(4, '0')}`;
+    });
   }
 
   async function fbLoadUsers() {
-    try {
-      const snap = await db.collection('users').get();
-      return snap.docs.map(d => d.data());
-    } catch (err) {
-      console.error('fbLoadUsers error:', err);
-      throw err;
-    }
+    const snap = await db.collection('users').get();
+    return snap.docs.map(d => d.data());
   }
 
   // -----------------------------------------------------------------
-  // Utilidades de seguridad y formato
+  // Seguridad: hashing con sal (PBKDF2)
+  // -----------------------------------------------------------------
+  async function hashPassword(pwd) {
+    const encoder = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(pwd),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits']
+    );
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      256
+    );
+    const hashArray = Array.from(new Uint8Array(derivedBits));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${saltHex}$${hashHex}`;
+  }
+
+  // -----------------------------------------------------------------
+  // Utilidades de sanitización
   // -----------------------------------------------------------------
   function sanitize(input) {
     return String(input || '')
@@ -177,31 +247,26 @@ const HelpDeskApp = (function () {
       })[c]);
   }
 
-  async function hashPassword(pwd) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(pwd);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
   // -----------------------------------------------------------------
-  // Arranque de la aplicación
+  // Arranque de la aplicación (sub‑funciones)
   // -----------------------------------------------------------------
   async function bootstrap() {
     if (!initAuth()) return;
-
     initFirebase();
+    await loadData();
+    await ensureDemoData();
+    renderAll();
+    setupSidebar();
+    setupCharCounter();
+    if (session.role === 'admin') showSection('dashboard');
+    else showSection('mytickets');
+  }
 
+  async function loadData() {
     if (useFirebase) {
       try {
         users = await fbLoadUsers();
         updateConnectionBadge(true);
-
-        if (users.length === 0) {
-          console.warn('No hay usuarios en Firebase. Debe crear usuarios mediante el módulo de gestión.');
-        }
-
         unsubscribeTickets = db.collection('tickets')
           .orderBy('createdAt', 'desc')
           .onSnapshot(snap => {
@@ -209,37 +274,29 @@ const HelpDeskApp = (function () {
             renderAll();
             updateNavBadge();
           }, err => {
-            console.error('onSnapshot error:', err);
+            logger.error('onSnapshot error:', err);
             showToast('Error de sincronización en tiempo real', 'error');
           });
-
         const initSnap = await db.collection('tickets')
           .orderBy('createdAt', 'desc')
           .get();
         tickets = initSnap.docs.map(d => d.data());
-
-        if (tickets.length === 0) await seedDemoData();
       } catch (err) {
-        console.error('Bootstrap Firebase falló:', err);
+        logger.error('Bootstrap Firebase falló:', err);
         showToast('No se pudo conectar a Firebase, se usará modo local', 'error');
         useFirebase = false;
         tickets = dbLoad();
         users = usersLoad();
-        await seedDemoData();
       }
     } else {
       updateConnectionBadge(false);
       tickets = dbLoad();
       users = usersLoad();
-      await seedDemoData();
     }
+  }
 
-    renderAll();
-    setupSidebar();
-    setupCharCounter();
-
-    if (session.role === 'admin') showSection('dashboard');
-    else showSection('mytickets');
+  async function ensureDemoData() {
+    if (tickets.length === 0) await seedDemoData();
   }
 
   // -----------------------------------------------------------------
@@ -286,7 +343,7 @@ const HelpDeskApp = (function () {
         }
         await batch.commit();
       } catch (err) {
-        console.error('seedDemoData Firebase error:', err);
+        logger.error('seedDemoData Firebase error:', err);
         showToast('Error al crear datos de demostración', 'error');
       }
     } else {
@@ -333,24 +390,20 @@ const HelpDeskApp = (function () {
 
   function showSection(name) {
     if (session.role === 'user' && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
-
     currentSection = name;
-
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     const navEl = document.getElementById(`nav-${name}`);
     if (navEl) navEl.classList.add('active');
-
     document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
     const sec = document.getElementById(`section-${name}`);
     if (sec) sec.classList.add('active');
-
     const meta = SECTION_META[name] || { title: name, subtitle: '' };
-    document.getElementById('pageTitle').textContent = meta.title;
-    document.getElementById('pageSubtitle').textContent = meta.subtitle;
-
+    const titleEl = document.getElementById('pageTitle');
+    const subtitleEl = document.getElementById('pageSubtitle');
+    if (titleEl) titleEl.textContent = meta.title;
+    if (subtitleEl) subtitleEl.textContent = meta.subtitle;
     const sbox = document.getElementById('searchBox');
     if (sbox) sbox.style.display = (name === 'tickets' || name === 'mytickets') ? 'flex' : 'none';
-
     if (name === 'dashboard') renderDashboard();
     if (name === 'tickets') renderTicketsList();
     if (name === 'mytickets') renderMyTickets();
@@ -419,10 +472,14 @@ const HelpDeskApp = (function () {
     tickets.forEach(t => { if (pc[t.priority] !== undefined) pc[t.priority]++; });
     const maxP = Math.max(...Object.values(pc), 1);
 
-    tryWidth('bar-critica', `${(pc['Crítica'] / maxP) * 100}%`); trySet('count-critica', pc['Crítica']);
-    tryWidth('bar-alta', `${(pc['Alta'] / maxP) * 100}%`); trySet('count-alta', pc['Alta']);
-    tryWidth('bar-media', `${(pc['Media'] / maxP) * 100}%`); trySet('count-media', pc['Media']);
-    tryWidth('bar-baja', `${(pc['Baja'] / maxP) * 100}%`); trySet('count-baja', pc['Baja']);
+    tryWidth('bar-critica', `${(pc['Crítica'] / maxP) * 100}%`);
+    trySet('count-critica', pc['Crítica']);
+    tryWidth('bar-alta', `${(pc['Alta'] / maxP) * 100}%`);
+    trySet('count-alta', pc['Alta']);
+    tryWidth('bar-media', `${(pc['Media'] / maxP) * 100}%`);
+    trySet('count-media', pc['Media']);
+    tryWidth('bar-baja', `${(pc['Baja'] / maxP) * 100}%`);
+    trySet('count-baja', pc['Baja']);
 
     const catCounts = {};
     tickets.forEach(t => { catCounts[t.category] = (catCounts[t.category] || 0) + 1; });
@@ -489,7 +546,6 @@ const HelpDeskApp = (function () {
   function renderMyTickets() {
     if (session.role !== 'user') return;
     const myTickets = tickets.filter(t => t.requesterId === session.userId);
-
     trySet('bannerName', `Hola, ${session.name.split(' ')[0]}`);
     trySet('ustat-total', myTickets.length);
     trySet('ustat-open', myTickets.filter(t => t.status === 'Abierto').length);
@@ -732,7 +788,7 @@ const HelpDeskApp = (function () {
           showToast(`Ticket ${id} creado`, 'success');
         }
       } catch (err) {
-        console.error('saveTicket Firebase error:', err);
+        logger.error('saveTicket Firebase error:', err);
         showToast('Error al guardar ticket: ' + err.message, 'error');
         return;
       }
@@ -1082,7 +1138,8 @@ const HelpDeskApp = (function () {
     if (e && e.target !== e.currentTarget) return;
     closeModalById('confirmModal');
     pendingDeleteId = null;
-    if (document.getElementById('confirmDeleteBtn')) document.getElementById('confirmDeleteBtn').onclick = executeDelete;
+    const btn = document.getElementById('confirmDeleteBtn');
+    if (btn) btn.onclick = executeDelete;
   }
 
   function closeModalById(id) {
@@ -1111,48 +1168,4 @@ const HelpDeskApp = (function () {
   function escHtml(str) { return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function trySet(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
   function tryVal(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
-  function tryWidth(id, val) { const el = document.getElementById(id); if (el) el.style.width = val; }
-
-  function statusBadgeHtml(st) {
-    const map = { 'Abierto': 'badge-abierto', 'En Progreso': 'badge-progreso', 'Resuelto': 'badge-resuelto', 'Cerrado': 'badge-cerrado' };
-    return `<span class="badge ${map[st] || ''}">${st}</span>`;
-  }
-
-  function priorityBadgeHtml(pr) {
-    const map = { 'Crítica': 'badge-critica', 'Alta': 'badge-alta', 'Media': 'badge-media', 'Baja': 'badge-baja' };
-    return `<span class="badge ${map[pr] || ''}">${pr}</span>`;
-  }
-
-  function categoryEmoji(c) { return ''; }
-
-  function formatDate(iso) {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-  }
-
-  function formatDateFull(iso) {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  }
-
-  // -----------------------------------------------------------------
-  // Exposición pública (mantener nombres originales)
-  // -----------------------------------------------------------------
-  return {
-    initAuth,
-    logout,
-    initFirebase,
-    updateConnectionBadge,
-    bootstrap,
-    renderAll,
-    showSection,
-    setupCharCounter,
-    filterTickets,
-    clearFilters,
-    openTicketModal,
-    resetForm,
-    editTicket,
-    saveTicket,
-    cancelForm,
-    assignarTecnico: asignarTecnico,
-    assignarTecnicoA
+  function tryWidth(id, val) { const el
