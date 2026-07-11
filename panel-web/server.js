@@ -169,6 +169,17 @@ function normalizarAnalisis(a) {
   return a;
 }
 
+// Referencias a archivos locales (script src, link href, import) — para validar integridad.
+function refsExternas(texto) {
+  const refs = new Set();
+  for (const m of texto.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)) refs.add(m[1]);
+  for (const m of texto.matchAll(/<link[^>]+href=["']([^"']+)["']/gi)) refs.add(m[1]);
+  for (const m of texto.matchAll(/(?:import|from)\s+["']([^"']+)["']/g)) refs.add(m[1]);
+  const res = new Set();
+  for (const r of refs) if (!/^(https?:|\/\/|data:)/.test(r)) res.add(r);
+  return res;
+}
+
 function recomendacionesTexto(a) {
   const partes = [];
   for (const p of a.problemas_criticos || []) partes.push(`- [CRÍTICO] ${p}`);
@@ -255,8 +266,11 @@ app.post("/api/corregir", async (req, res) => {
       if (i === MAX_ITER) break;
       const nuevo = await corregir(codigo, nombre, recomendacionesTexto(analisis));
       if (!nuevo || nuevo.trim() === codigo.trim()) break;
-      // Freno de seguridad: si el resultado salió muy recortado, está roto -> no aplicar.
+      // Validador de integridad: no aplicar si salió recortado o introduce archivos inexistentes.
       if (nuevo.length < codigo.length * 0.6) break;
+      const antes = refsExternas(codigo);
+      const introduce = [...refsExternas(nuevo)].filter((r) => !antes.has(r));
+      if (introduce.length) break;
       codigo = nuevo;
     }
 
