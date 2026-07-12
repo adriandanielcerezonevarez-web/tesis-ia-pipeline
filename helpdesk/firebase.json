@@ -1,9 +1,15 @@
 {
+  "firestore": {
+    "rules": "firestore.rules"
+  },
   "hosting": {
     "site": "helpdesk-arce-cerezo",
     "public": ".",
     "ignore": [
       "firebase.json",
+      "firestore.rules",
+      "firebase-config.example.js",
+      "crear_usuarios.js",
       "**/.*",
       "**/node_modules/**",
       "dist/**",

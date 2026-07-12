@@ -155,6 +155,7 @@
   <!-- firebase -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="firebase-config.js"></script>
 </head>
 
@@ -180,7 +181,7 @@
 
       <form id="loginForm" onsubmit="handleLogin(event)">
         <div class="form-group">
-          <label class="form-label" for="loginUsername">Usuario</label>
+          <label class="form-label" for="loginEmail">Correo electrónico</label>
           <div class="input-wrapper">
             <span class="input-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -189,7 +190,7 @@
                 <circle cx="12" cy="7" r="4" />
               </svg>
             </span>
-            <input class="form-input" type="text" id="loginUsername" placeholder="Tu nombre de usuario"
+            <input class="form-input" type="email" id="loginEmail" placeholder="tucorreo@empresa.com"
               autocomplete="username" required />
           </div>
         </div>
@@ -223,25 +224,13 @@
       </form>
 
       <div class="demo-hint">
-        <div class="demo-hint-title">Usuarios de prueba (clic para rellenar):</div>
+        <div class="demo-hint-title">Accesos de prueba (clic para rellenar el correo):</div>
         <div class="demo-chips">
-          <div class="demo-chip" onclick="fillDemo('admin','admin123')">
-            <strong>admin</strong> / admin123
-            <span class="chip-role">admin</span>
-          </div>
-          <div class="demo-chip" onclick="fillDemo('profesor','profesor123')">
-            <strong>profesor</strong> / profesor123
-            <span class="chip-role">admin</span>
-          </div>
-          <div class="demo-chip" onclick="fillDemo('adrian','user123')">
-            <strong>adrian</strong> / user123
-            <span class="chip-role">usuario</span>
-          </div>
-          <div class="demo-chip" onclick="fillDemo('allison','user456')">
-            <strong>allison</strong> / user456
-            <span class="chip-role">usuario</span>
-          </div>
+          <div class="demo-chip" onclick="fillDemo('admin@empresa.com')"><strong>admin@empresa.com</strong><span class="chip-role">admin</span></div>
+          <div class="demo-chip" onclick="fillDemo('adrian@empresa.com')"><strong>adrian@empresa.com</strong><span class="chip-role">usuario</span></div>
+          <div class="demo-chip" onclick="fillDemo('allison@empresa.com')"><strong>allison@empresa.com</strong><span class="chip-role">usuario</span></div>
         </div>
+      </div>
       </div>
 
       <div class="login-footer">
@@ -250,132 +239,68 @@
   </div>
 
   <script>
-    // claves localStorage
-    const USERS_KEY = 'helpdesk_users';
     const SESSION_KEY = 'helpdesk_session';
 
-    // intenta arrancar firebase
-    let db = null;
+    // Inicializa Firebase (App + Auth + Firestore)
+    let auth = null, db = null;
     if (typeof FIREBASE_CONFIGURED !== 'undefined' && FIREBASE_CONFIGURED) {
       try {
-        firebase.initializeApp(FIREBASE_CONFIG);
+        if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+        auth = firebase.auth();
         db = firebase.firestore();
+        // La sesión persiste en el navegador (token seguro gestionado por Firebase).
+        auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
       } catch (err) {
-        console.warn('firebase init falló:', err);
-        db = null;
+        console.error('firebase init falló:', err);
       }
     }
 
-    // muestra en el footer si vamos online o en local
     function setOnlineIndicator(online) {
       const footer = document.querySelector('.login-footer');
       if (!footer) return;
       const badge = online
         ? '<span style="color:#2e7d32">online</span>'
-        : '<span style="color:#b76e00">modo local</span>';
+        : '<span style="color:#c62828">sin conexión a Firebase</span>';
       footer.innerHTML = 'helpdesk arce-cerezo v2.0 &middot; ' + badge;
     }
+    setOnlineIndicator(Boolean(auth));
 
-    // usuarios por defecto (se cargan si la BD está vacía)
-    const DEFAULT_USERS = [
-      { id: 'u1', username: 'admin', password: 'admin123', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
-      { id: 'u2', username: 'profesor', password: 'profesor123', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
-      { id: 'u3', username: 'adrian', password: 'user123', name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
-      { id: 'u4', username: 'allison', password: 'user456', name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
-    ];
-
-    async function seedUsers() {
-      if (db) {
-        try {
-          const snap = await db.collection('users').get();
-          let needsUpdate = snap.empty;
-          // TODO: quitar esto cuando los usuarios ya estén bien en prod
-          snap.docs.forEach(d => {
-            const data = d.data();
-            if (data.id === 'u3' && (data.username !== 'adrian' || data.password !== 'user123')) needsUpdate = true;
-            if (data.id === 'u4' && (data.username !== 'allison' || data.password !== 'user456')) needsUpdate = true;
-            if (data.id === 'u2' && (data.username !== 'profesor' || data.password !== 'profesor123')) needsUpdate = true;
-          });
-
-          if (needsUpdate) {
-            const batch = db.batch();
-            DEFAULT_USERS.forEach(u => batch.set(db.collection('users').doc(u.id), u));
-            await batch.commit();
-          }
-          setOnlineIndicator(true);
-        } catch (err) {
-          console.error('seedUsers fb:', err);
-          seedUsersLocal();
-          setOnlineIndicator(false);
-        }
-      } else {
-        seedUsersLocal();
-        setOnlineIndicator(false);
-      }
-    }
-
-    function seedUsersLocal() {
-      const existing = JSON.parse(localStorage.getItem(USERS_KEY) || 'null');
-      if (!existing) localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
-    }
-
-    function handleLogin(e) {
+    async function handleLogin(e) {
       e.preventDefault();
       const btn = document.getElementById('loginBtn');
-      btn.classList.add('loading');
-      btn.disabled = true;
-      hideError();
+      btn.classList.add('loading'); btn.disabled = true; hideError();
 
-      const username = document.getElementById('loginUsername').value.trim().toLowerCase();
+      const email = document.getElementById('loginEmail').value.trim();
       const password = document.getElementById('loginPassword').value;
 
-      if (db) {
-        db.collection('users')
-          .where('username', '==', username)
-          .where('password', '==', password)
-          .get()
-          .then(snap => {
-            if (!snap.empty) {
-              const user = snap.docs[0].data();
-              const session = { userId: user.id, username: user.username, name: user.name, role: user.role, loginAt: new Date().toISOString() };
-              sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-              window.location.href = 'index.html';
-            } else {
-              showError('Usuario o contraseña incorrectos.');
-              document.getElementById('loginPassword').value = '';
-              document.getElementById('loginUsername').classList.add('error');
-              document.getElementById('loginPassword').classList.add('error');
-              btn.classList.remove('loading');
-              btn.disabled = false;
-            }
-          })
-          .catch(err => {
-            // si falla firebase, probamos contra localStorage
-            console.error('login fb:', err);
-            loginLocal(username, password, btn);
-          });
-      } else {
-        // pequeño delay para que se vea el spinner
-        setTimeout(() => loginLocal(username, password, btn), 600);
+      if (!auth) { showError('No hay conexión con el servidor de autenticación.'); resetBtn(btn); return; }
+
+      try {
+        // Autenticación real: la contraseña la valida Firebase, nunca el navegador.
+        const cred = await auth.signInWithEmailAndPassword(email, password);
+        const uid = cred.user.uid;
+
+        // Perfil y rol se leen de users/{uid} (SIN contraseña).
+        let name = cred.user.email, role = 'user';
+        try {
+          const doc = await db.collection('users').doc(uid).get();
+          if (doc.exists) { const d = doc.data(); name = d.name || name; role = d.role || 'user'; }
+        } catch (_) {}
+
+        const session = { userId: uid, email: cred.user.email, name, role, loginAt: new Date().toISOString() };
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        window.location.href = 'index.html';
+      } catch (err) {
+        const codigos = ['auth/wrong-password','auth/user-not-found','auth/invalid-credential','auth/invalid-email'];
+        showError(codigos.includes(err.code) ? 'Correo o contraseña incorrectos.' : ('Error: ' + err.message));
+        document.getElementById('loginPassword').value = '';
+        document.getElementById('loginEmail').classList.add('error');
+        document.getElementById('loginPassword').classList.add('error');
+        resetBtn(btn);
       }
     }
 
-    function loginLocal(username, password, btn) {
-      const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      const user = users.find(u => u.username.toLowerCase() === username && u.password === password);
-      if (user) {
-        const session = { userId: user.id, username: user.username, name: user.name, role: user.role, loginAt: new Date().toISOString() };
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-        window.location.href = 'index.html';
-      } else {
-        showError('Usuario o contraseña incorrectos.');
-        document.getElementById('loginPassword').value = '';
-        document.getElementById('loginUsername').classList.add('error');
-        document.getElementById('loginPassword').classList.add('error');
-        btn.classList.remove('loading');
-        btn.disabled = false;
-      }
-    }
+    function resetBtn(btn){ btn.classList.remove('loading'); btn.disabled = false; }
 
     function showError(msg) {
       const el = document.getElementById('errorMsg');
@@ -386,35 +311,25 @@
       document.getElementById('errorMsg').classList.remove('show');
       document.querySelectorAll('.form-input').forEach(i => i.classList.remove('error'));
     }
-
     function togglePassword() {
       const pwd = document.getElementById('loginPassword');
       const icon = document.getElementById('eyeIcon');
       const show = pwd.type === 'password';
       pwd.type = show ? 'text' : 'password';
       icon.innerHTML = show
-        ? `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>`
-        : `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`;
+        ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+        : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
     }
-
-    function fillDemo(user, pass) {
-      document.getElementById('loginUsername').value = user;
-      document.getElementById('loginPassword').value = pass;
+    function fillDemo(email) {
+      document.getElementById('loginEmail').value = email;
       hideError();
-      document.getElementById('loginUsername').focus();
+      document.getElementById('loginPassword').focus();
     }
 
-    // si ya hay sesión, saltamos al index
-    const existingSession = sessionStorage.getItem(SESSION_KEY);
-    if (existingSession) window.location.href = 'index.html';
+    // Si ya hay sesión activa, saltar directo al index.
+    if (sessionStorage.getItem(SESSION_KEY)) window.location.href = 'index.html';
 
-    // limpia el mensaje de error cuando el usuario empieza a escribir
-    document.querySelectorAll('.form-input').forEach(input => {
-      input.addEventListener('input', hideError);
-    });
-
-    // Inicializar
-    seedUsers();
+    document.querySelectorAll('.form-input').forEach(input => input.addEventListener('input', hideError));
   </script>
 </body>
 

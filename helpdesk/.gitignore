@@ -1,4 +1,6 @@
+# Secretos y credenciales: NUNCA subir
+serviceAccountKey.json
+.env
+*.key
 node_modules/
-dist/
-.firebase/
-*.log
+package-lock.json

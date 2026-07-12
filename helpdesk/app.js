@@ -61,6 +61,7 @@ function initAuth() {
 
 function logout() {
   if (unsubscribeTickets) unsubscribeTickets();
+  try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (_) {}
   sessionStorage.removeItem(SESSION_KEY);
   window.location.href = 'login.html';
 }
@@ -119,32 +120,21 @@ if (window.location.pathname.endsWith('login.html')) {
 
     initFirebase();
 
+    // Guard de seguridad: si hay Firebase pero no hay sesión autenticada, volver al login.
+    if (useFirebase && firebase.auth) {
+      if (!firebase.auth().currentUser) {
+        await new Promise(res => { const off = firebase.auth().onAuthStateChanged(() => { off(); res(); }); });
+      }
+      if (!firebase.auth().currentUser) { logout(); return; }
+    }
+
     if (useFirebase) {
       try {
         users = await fbLoadUsers();
         updateConnectionBadge(true);
 
-        // si la colección está vacía o todavía tiene los usuarios viejos, los pisamos
-        // FIXME: esto se debería quitar cuando la BD esté estable
-        let needsUpdate = users.length === 0;
-        users.forEach(data => {
-          if (data.id === 'u3' && (data.username !== 'adrian' || data.password !== 'user123')) needsUpdate = true;
-          if (data.id === 'u4' && (data.username !== 'allison' || data.password !== 'user456')) needsUpdate = true;
-          if (data.id === 'u2' && (data.username !== 'profesor' || data.password !== 'profesor123')) needsUpdate = true;
-        });
-
-        if (needsUpdate) {
-          const defaults = [
-            { id: 'u1', username: 'admin', password: 'admin123', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u2', username: 'profesor', password: 'profesor123', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u3', username: 'adrian', password: 'user123', name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u4', username: 'allison', password: 'user456', name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
-          ];
-          const batch = db.batch();
-          defaults.forEach(u => batch.set(db.collection('users').doc(u.id), u));
-          await batch.commit();
-          users = defaults;
-        }
+        // Los usuarios y sus contraseñas los gestiona Firebase Authentication.
+        // Aquí solo se leen los perfiles (nombre y rol); nunca se guardan contraseñas.
 
         // suscripción a cambios en tickets
         unsubscribeTickets = db.collection('tickets')
@@ -377,6 +367,7 @@ function renderTicketsList(filtered) {
           <div class="action-buttons">
             <button class="action-btn" title="Ver" onclick="openTicketModal('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             <button class="action-btn" title="Editar" onclick="editTicket('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            <button class="action-btn" title="Asignar técnico" onclick="asignarTecnico('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></button>
             <button class="action-btn danger" title="Eliminar" onclick="confirmDelete('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
           </div>
         </td>
@@ -654,6 +645,51 @@ async function saveTicket(e) {
 function cancelForm() {
   editingId = null;
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
+}
+
+// ── Asignación rápida de técnico (botón en cada ticket) ──
+const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'];
+
+function asignarTecnico(id) {
+  if (session.role !== 'admin') { showToast('Acceso denegado', 'error'); return; }
+  cerrarMenuAsignar();
+  const overlay = document.createElement('div');
+  overlay.id = 'asignarOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;';
+  overlay.onclick = (e) => { if (e.target === overlay) cerrarMenuAsignar(); };
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:6px;padding:18px 20px;min-width:280px;box-shadow:0 4px 18px rgba(0,0,0,.22);';
+  box.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;">Asignar técnico al ticket ' + id + '</h3>' +
+    TECNICOS.map(tec => '<button class="btn btn-ghost btn-sm" style="display:block;width:100%;text-align:left;margin-bottom:6px;" onclick="asignarTecnicoA(\'' + id + '\',\'' + tec + '\')">' + tec + '</button>').join('') +
+    '<button class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--text-muted);" onclick="cerrarMenuAsignar()">Cancelar</button>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+function cerrarMenuAsignar() {
+  const o = document.getElementById('asignarOverlay');
+  if (o) o.remove();
+}
+
+async function asignarTecnicoA(id, tecnico) {
+  cerrarMenuAsignar();
+  if (session.role !== 'admin') return;
+  if (useFirebase) {
+    try {
+      await db.collection('tickets').doc(id).update({ assigned: tecnico, updatedAt: new Date().toISOString() });
+      showToast('Ticket ' + id + ' asignado a ' + tecnico, 'success');
+    } catch (err) {
+      showToast('Error al asignar: ' + err.message, 'error');
+    }
+  } else {
+    const idx = tickets.findIndex(t => t.id === id);
+    if (idx !== -1) {
+      tickets[idx] = { ...tickets[idx], assigned: tecnico, updatedAt: new Date().toISOString() };
+      dbSave(tickets);
+      showToast('Ticket ' + id + ' asignado a ' + tecnico, 'success');
+      renderAll();
+    }
+  }
 }
 
 // borrado
