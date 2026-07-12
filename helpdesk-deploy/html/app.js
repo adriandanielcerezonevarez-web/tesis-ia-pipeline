@@ -658,7 +658,7 @@ function cancelForm() {
 }
 
 // ── Asignación rápida de técnico (botón en cada ticket) ──
-const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Ivan Rodrigues'];
+const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'];
 
 function asignarTecnico(id) {
   if (session.role !== 'admin') { showToast('Acceso denegado', 'error'); return; }
