@@ -1,0 +1,31 @@
+services:
+  helpdesk:
+    image: caddy:alpine
+    container_name: helpdesk
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./html:/srv
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - panel
+
+  panel:
+    build: ../panel-web
+    container_name: panel
+    restart: unless-stopped
+    environment:
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - HELPDESK_DIR=/helpdesk
+    volumes:
+      - ./html:/helpdesk
+    expose:
+      - "3000"
+
+volumes:
+  caddy_data:
+  caddy_config:

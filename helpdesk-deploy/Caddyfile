@@ -1,0 +1,10 @@
+helpdesk-arce.duckdns.org {
+	root * /srv
+	file_server
+	encode gzip
+}
+
+cerezoarce.duckdns.org {
+	reverse_proxy panel:3000
+	encode gzip
+}
