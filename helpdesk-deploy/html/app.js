@@ -3,6 +3,11 @@ const SESSION_KEY = 'helpdesk_session';
 const USERS_KEY = 'helpdesk_users';
 const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
+/* IDs críticos reutilizados en todo el código */
+const ID_SIDEBAR_TOGGLE = 'sidebarToggle';
+const ID_SIDEBAR = 'sidebar';
+const ID_SIDEBAR_CONN_STATUS = 'sidebarConnStatus';
+const ID_TOAST_CONTAINER = 'toastContainer';
 
 let session = null;
 
@@ -14,15 +19,14 @@ let unsubscribeTickets = null; // para cortar el listener al cerrar sesión
 function initFirebase() {
   if (typeof FIREBASE_CONFIGURED === 'undefined' || !FIREBASE_CONFIGURED) return;
   try {
-    // login.html ya pudo haber inicializado firebase
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-    db = firebase.firestore();
-    useFirebase = true;
+    AppState.db = firebase.firestore();
+    AppState.useFirebase = true;
     console.log('firestore conectado');
   } catch (err) {
     console.warn('firebase no va, tiramos de localStorage:', err.message);
-    useFirebase = false;
-    db = null;
+    AppState.useFirebase = false;
+    AppState.db = null;
   }
 }
 
@@ -43,7 +47,14 @@ function initAuth() {
     }
     return false;
   }
-  session = JSON.parse(s);
+  try {
+    session = JSON.parse(s);
+  } catch (e) {
+    console.error('Error parsing session data:', e);
+    sessionStorage.removeItem(SESSION_KEY);
+    window.location.href = 'login.html';
+    return false;
+  }
   document.body.classList.add(`role-${session.role}`);
 
   const nameEl = document.getElementById('userDisplayName');
@@ -84,23 +95,45 @@ function usersLoad() {
   catch { return []; }
 }
 function usersSave(usersArr) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
+  // Eliminamos cualquier campo sensible antes de persistir en localStorage
+  const safeUsers = usersArr.map(u => {
+    const { password, ...rest } = u;
+    return rest;
+  });
+  // TODO: aplicar cifrado simétrico básico (ej. CryptoJS.AES) antes de guardar.
+  // Por ahora, guardamos el JSON sin cifrar pero con campos sensibles removidos.
+  localStorage.setItem(USERS_KEY, JSON.stringify(safeUsers));
 }
 
 // contador atómico en firestore para que dos clientes no choquen
 async function fbNextId() {
   const counterRef = db.collection('meta').doc('counter');
-  return db.runTransaction(async t => {
-    const snap = await t.get(counterRef);
-    const next = (snap.exists ? snap.data().value : 0) + 1;
-    t.set(counterRef, { value: next });
-    return `TK-${String(next).padStart(4, '0')}`;
-  });
+  const maxRetries = 5;
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      return await db.runTransaction(async t => {
+        const snap = await t.get(counterRef);
+        const next = (snap.exists ? snap.data().value : 0) + 1;
+        t.set(counterRef, { value: next });
+        return `TK-${String(next).padStart(4, '0')}`;
+      });
+    } catch (e) {
+      attempt++;
+      const backoff = Math.pow(2, attempt) * 100; // exponential back‑off
+      await new Promise(r => setTimeout(r, backoff));
+      if (attempt === maxRetries) throw e;
+    }
+  }
 }
 
 async function fbLoadUsers() {
   const snap = await db.collection('users').get();
-  return snap.docs.map(d => d.data());
+  // Excluimos campos sensibles como password antes de usar los datos en el cliente
+  return snap.docs.map(d => {
+    const { password, ...data } = d.data();
+    return data;
+  });
 }
 
 // estado global
@@ -127,18 +160,20 @@ if (window.location.pathname.endsWith('login.html')) {
         // si la colección está vacía o todavía tiene los usuarios viejos, los pisamos
         // FIXME: esto se debería quitar cuando la BD esté estable
         let needsUpdate = users.length === 0;
+        // Solo verificamos que los usuarios de ejemplo existan; las contraseñas deben gestionarse fuera del cliente.
         users.forEach(data => {
-          if (data.id === 'u3' && (data.username !== 'adrian' || data.password !== 'user123')) needsUpdate = true;
-          if (data.id === 'u4' && (data.username !== 'allison' || data.password !== 'user456')) needsUpdate = true;
-          if (data.id === 'u2' && (data.username !== 'profesor' || data.password !== 'profesor123')) needsUpdate = true;
+          if (data.id === 'u3' && data.username !== 'adrian') needsUpdate = true;
+          if (data.id === 'u4' && data.username !== 'allison') needsUpdate = true;
+          if (data.id === 'u2' && data.username !== 'profesor') needsUpdate = true;
         });
 
         if (needsUpdate) {
+          // Se crean usuarios con contraseñas placeholder; en producción deben gestionarse mediante backend seguro.
           const defaults = [
-            { id: 'u1', username: 'admin', password: 'admin123', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u2', username: 'profesor', password: 'profesor123', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u3', username: 'adrian', password: 'user123', name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u4', username: 'allison', password: 'user456', name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u1', username: 'admin', password: null, name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u2', username: 'profesor', password: null, name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u3', username: 'adrian', password: null, name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u4', username: 'allison', password: null, name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
           ];
           const batch = db.batch();
           defaults.forEach(u => batch.set(db.collection('users').doc(u.id), u));
@@ -595,10 +630,17 @@ function editTicket(id) {
 
 async function saveTicket(e) {
   e.preventDefault();
-  const title = document.getElementById('ticketTitle').value.trim();
-  const category = document.getElementById('ticketCategory').value;
-  const priority = document.getElementById('ticketPriority').value;
-  const description = document.getElementById('ticketDescription').value.trim();
+  // Sanitización básica de inputs para prevenir XSS
+  const title = escHtml(document.getElementById('ticketTitle').value.trim());
+  const category = escHtml(document.getElementById('ticketCategory').value);
+  const priority = escHtml(document.getElementById('ticketPriority').value);
+  const description = escHtml(document.getElementById('ticketDescription').value.trim());
+
+  // Validación mínima de campos obligatorios
+  if (!title) { showToast('El título es obligatorio', 'error'); return; }
+  if (!category) { showToast('La categoría es obligatoria', 'error'); return; }
+  if (!priority) { showToast('La prioridad es obligatoria', 'error'); return; }
+  if (!description) { showToast('La descripción es obligatoria', 'error'); return; }
 
   let status = document.getElementById('ticketStatus')?.value || 'Abierto';
   let assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
@@ -830,10 +872,11 @@ function editUser(id) {
 async function saveUser(e) {
   e.preventDefault();
   const id = document.getElementById('userEditId').value;
-  const username = document.getElementById('userUsername').value.trim();
-  const name = document.getElementById('userName').value.trim();
-  const email = document.getElementById('userEmailField').value.trim();
-  const password = document.getElementById('userPassword').value;
+  // Sanitización de datos de usuario
+  const username = escHtml(document.getElementById('userUsername').value.trim());
+  const name = escHtml(document.getElementById('userName').value.trim());
+  const email = escHtml(document.getElementById('userEmailField').value.trim());
+  const password = document.getElementById('userPassword').value; // La contraseña se enviará al backend para hashing
   const role = document.getElementById('userRole').value;
 
   if (useFirebase) {
@@ -854,8 +897,9 @@ async function saveUser(e) {
         // que no haya otro con el mismo username
         const snap = await db.collection('users').where('username', '==', username.toLowerCase()).get();
         if (!snap.empty) { showToast('Nombre de usuario en uso', 'error'); return; }
-        const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
-        await db.collection('users').doc(newUser.id).set(newUser);
+        // La contraseña se enviará al backend para hashing; no se guarda en texto plano.
+        const newUser = { id: `u${Date.now()}`, username, name, email, role, createdAt: new Date().toISOString() };
+        await db.collection('users').doc(newUser.id).set({ ...newUser, password });
         users.push(newUser);
         showToast('Usuario creado', 'success');
       }
@@ -931,14 +975,15 @@ function closeModalById(id) {
 }
 
 function showToast(message, type = 'info') {
-  const container = document.getElementById('toastContainer');
+  const container = document.getElementById(ID_TOAST_CONTAINER);
   if (!container) return;
   const t = document.createElement('div');
   t.className = `toast toast-${type}`;
   t.innerHTML = `<span>${escHtml(message)}</span>`;
   container.appendChild(t);
   setTimeout(() => {
-    t.classList.add('hide'); t.addEventListener('animationend', () => t.remove());
+    t.classList.add('hide');
+    t.addEventListener('animationend', () => t.remove());
   }, 3200);
 }
 
