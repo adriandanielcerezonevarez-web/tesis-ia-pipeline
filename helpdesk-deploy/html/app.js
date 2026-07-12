@@ -238,7 +238,7 @@ function setupSidebar() {
 // navegación entre secciones
 const SECTION_META = {
   dashboard: { title: 'Panel de Control', subtitle: 'Resumen general del sistema' },
-  tickets: { title: 'Todos los Tickets', subtitle: 'Gestión global de soporte' },
+  tickets: { title: 'Todos mis Tickets', subtitle: 'Gestión global de soporte' },
   mytickets: { title: 'Mis Tickets', subtitle: 'Gestión de tus solicitudes' },
   create: { title: 'Nuevo Ticket', subtitle: 'Crear un nuevo ticket' },
   reports: { title: 'Reportes', subtitle: 'Estadísticas del sistema' },
