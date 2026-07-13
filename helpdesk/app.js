@@ -636,6 +636,7 @@ async function saveTicket(e) {
     }
     renderAll();
   }
+  efewfewfew
 
   editingId = null;
   if (!useFirebase) showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
@@ -648,7 +649,7 @@ function cancelForm() {
 }
 
 // ── Asignación rápida de técnico (botón en cada ticket) ──
-const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'];
+const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza','Ing. Revvelion'];
 
 function asignarTecnico(id) {
   if (session.role !== 'admin') { showToast('Acceso denegado', 'error'); return; }
