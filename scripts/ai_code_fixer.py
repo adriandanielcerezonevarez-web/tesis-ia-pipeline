@@ -52,10 +52,15 @@ contexto para que sea único e inconfundible dentro del archivo>
 REGLAS OBLIGATORIAS:
 - El texto entre @@BUSCAR@@ y @@REEMPLAZAR@@ debe existir EXACTAMENTE en el código (misma
   indentación, mismas comillas, mismos espacios). Cópialo literal; si no coincide, se descarta.
-- Haz cambios MÍNIMOS: seguridad (credenciales, inyección), validación de datos y manejo de errores.
+- Haz cambios MÍNIMOS enfocados en: ERRORES DE SINTAXIS, líneas basura o identificadores sin sentido,
+  código muerto, seguridad (credenciales, inyección), validación de datos y manejo de errores.
+- APLICA SIEMPRE las recomendaciones que recibes en el mensaje. Si una recomendación pide eliminar una
+  línea (por ejemplo una línea basura que rompe la sintaxis), elimínala.
+- Para ELIMINAR una línea, cópiala en @@BUSCAR@@ junto con 1 o 2 líneas de contexto y OMÍTELA en
+  @@REEMPLAZAR@@ (deja únicamente el contexto).
 - NO toques el diseño, estilos, HTML de presentación ni la estructura salvo que sea imprescindible.
 - NO inventes clases, NO separes el código a otros archivos, NO cambies referencias (<link>, <script src>).
-- Máximo 6 bloques, los más importantes. Si no hay cambios realmente seguros, no devuelvas ningún bloque.
+- Máximo 6 bloques, los más importantes. Solo devuelve vacío si el código ya está perfecto.
 - No escribas nada fuera de los bloques.
 """.strip()
 
@@ -126,14 +131,11 @@ def obtener_cambios(ruta: str) -> str:
     base del Pull Request. Si no hay contexto de PR o git falla, retorna cadena
     vacía y la corrección se hace considerando todo el archivo (como antes).
     """
-    base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    base = os.environ.get("GITHUB_BASE_REF", "").strip() or "main"
     try:
-        if base:
-            subprocess.run(["git", "fetch", "--depth=1", "origin", base],
-                           capture_output=True, timeout=40)
-            referencia = f"origin/{base}"
-        else:
-            referencia = "HEAD~1"
+        subprocess.run(["git", "fetch", "--depth=1", "origin", base],
+                       capture_output=True, timeout=40)
+        referencia = f"origin/{base}"
         salida = subprocess.run(
             ["git", "diff", "--unified=0", referencia, "--", ruta],
             capture_output=True, text=True, timeout=40,

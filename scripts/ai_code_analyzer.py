@@ -127,14 +127,11 @@ def obtener_cambios(ruta: str) -> str:
     Si no hay contexto de Pull Request o git falla, retorna cadena vacía y el
     análisis se realiza sobre el archivo completo (comportamiento anterior).
     """
-    base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    base = os.environ.get("GITHUB_BASE_REF", "").strip() or "main"
     try:
-        if base:
-            subprocess.run(["git", "fetch", "--depth=1", "origin", base],
-                           capture_output=True, timeout=40)
-            referencia = f"origin/{base}"
-        else:
-            referencia = "HEAD~1"
+        subprocess.run(["git", "fetch", "--depth=1", "origin", base],
+                       capture_output=True, timeout=40)
+        referencia = f"origin/{base}"
         salida = subprocess.run(
             ["git", "diff", "--unified=0", referencia, "--", ruta],
             capture_output=True, text=True, timeout=40,

@@ -33,7 +33,7 @@ except ImportError:
     print("ERROR: Librería 'openai' no instalada. Ejecuta: pip install openai")
     sys.exit(1)
 
-from ai_code_analyzer import analizar_con_ia, leer_archivo
+from ai_code_analyzer import analizar_con_ia, leer_archivo, obtener_cambios
 from ai_code_fixer import corregir_con_ia
 
 CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
@@ -132,9 +132,14 @@ def main():
         scores = []
         print(f"📄 {ruta}")
 
+        # Diff del PR: el análisis y la corrección se enfocan en las líneas cambiadas.
+        cambios = obtener_cambios(ruta)
+        if cambios:
+            print(f"   Enfocando en {len(cambios.splitlines())} línea(s) cambiada(s) del PR.")
+
         for iteracion in range(args.max_iter + 1):
             codigo_actual = Path(ruta).read_text(encoding="utf-8", errors="replace")
-            analisis = analizar_con_ia(cliente, codigo_actual, nombre, extension)
+            analisis = analizar_con_ia(cliente, codigo_actual, nombre, extension, cambios)
 
             if "error" in analisis:
                 print(f"   [WARN] Error de análisis: {analisis['error']}")
@@ -156,7 +161,7 @@ def main():
 
             # Corregir aplicando las recomendaciones del análisis actual
             recomendaciones = construir_recomendaciones(analisis)
-            corregido = corregir_con_ia(cliente, codigo_actual, nombre, extension, recomendaciones)
+            corregido = corregir_con_ia(cliente, codigo_actual, nombre, extension, recomendaciones, cambios)
 
             if not corregido or corregido.strip() == codigo_actual.strip():
                 print(f"   = La IA no aplicó más cambios; se detiene.\n")
