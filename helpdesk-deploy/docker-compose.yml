@@ -7,7 +7,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./html:/srv
+      - ../helpdesk:/srv
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
@@ -22,7 +22,7 @@ services:
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - HELPDESK_DIR=/helpdesk
     volumes:
-      - ./html:/helpdesk
+      - ../helpdesk:/helpdesk
     expose:
       - "3000"
 
