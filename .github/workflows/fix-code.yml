@@ -197,3 +197,77 @@ jobs:
               issue_number: context.issue.number,
               body: '📝 **Modo corrección manual seleccionado.**\n\nRevisa las recomendaciones del reporte de análisis de IA en este Pull Request, aplica los cambios en tu código y vuelve a subir un commit a esta rama. El pipeline analizará automáticamente los nuevos cambios y actualizará la puntuación de calidad.'
             });
+
+  # ──────────────────────────────────────────────────────────
+  #  /desplegar-forzado : despliega el código del PR AUNQUE no pase el gate
+  # ──────────────────────────────────────────────────────────
+  desplegar-forzado:
+    name: "⚠️ Despliegue Forzado (a pesar de los riesgos)"
+    runs-on: ubuntu-latest
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/desplegar-forzado')
+    steps:
+      - name: Reaccionar al comentario
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+      - name: Obtener rama del Pull Request
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_ref', pr.data.head.ref);
+      - name: Desplegar el código del PR en el VPS (forzado)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          PR_BRANCH: ${{ steps.pr.outputs.head_ref }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: "20m"
+          envs: PR_BRANCH
+          script: |
+            set -e
+            echo "⚠️ DESPLIEGUE FORZADO a pesar de los riesgos — rama: $PR_BRANCH"
+            REPO=/root/tesis-ia-pipeline
+            if [ ! -d "$REPO/.git" ]; then
+              git clone https://github.com/adriandanielcerezonevarez-web/tesis-ia-pipeline.git "$REPO"
+            fi
+            cd "$REPO"
+            git fetch origin "$PR_BRANCH"
+            git reset --hard "origin/$PR_BRANCH"
+            docker rm -f helpdesk helpdesk-prod helpdesk-staging 2>/dev/null || true
+            cd "$REPO/helpdesk-deploy"
+            docker compose up -d --build --remove-orphans
+            docker image prune -f
+            echo "✅ Despliegue forzado completado."
+      - name: Registrar el despliegue forzado en el PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const quien = context.payload.comment.user.login;
+            const fecha = new Date().toISOString();
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '## ⚠️ Despliegue FORZADO a pesar de los riesgos\n\n' +
+                    '**Forzado por:** @' + quien + '\n' +
+                    '**Fecha:** ' + fecha + '\n\n' +
+                    'El código de esta rama se desplegó al VPS **sin pasar el Quality Gate**. Queda registrado para trazabilidad.\n\n' +
+                    'HelpDesk: https://helpdesk-arce.duckdns.org'
+            });
