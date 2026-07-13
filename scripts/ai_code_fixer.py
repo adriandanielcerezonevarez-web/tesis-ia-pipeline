@@ -17,6 +17,7 @@ import sys
 import re
 import json
 import argparse
+import subprocess
 from pathlib import Path
 
 try:
@@ -119,8 +120,33 @@ def aplicar_parches(codigo, respuesta):
     return nuevo
 
 
+def obtener_cambios(ruta: str) -> str:
+    """
+    Obtiene solo las líneas nuevas o modificadas del archivo respecto a la rama
+    base del Pull Request. Si no hay contexto de PR o git falla, retorna cadena
+    vacía y la corrección se hace considerando todo el archivo (como antes).
+    """
+    base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    try:
+        if base:
+            subprocess.run(["git", "fetch", "--depth=1", "origin", base],
+                           capture_output=True, timeout=40)
+            referencia = f"origin/{base}"
+        else:
+            referencia = "HEAD~1"
+        salida = subprocess.run(
+            ["git", "diff", "--unified=0", referencia, "--", ruta],
+            capture_output=True, text=True, timeout=40,
+        )
+        agregadas = [linea[1:] for linea in salida.stdout.splitlines()
+                     if linea.startswith("+") and not linea.startswith("+++")]
+        return "\n".join(agregadas).strip()
+    except Exception:
+        return ""
+
+
 def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
-                    extension: str, recomendaciones: str) -> str:
+                    extension: str, recomendaciones: str, cambios: str = "") -> str:
     """
     Envía el código y las recomendaciones al modelo y retorna el código corregido.
     Si algo falla, retorna cadena vacía (no se modifica el archivo).
@@ -130,6 +156,15 @@ def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
         "según las 7 dimensiones."
     )
 
+    bloque_enfoque = ""
+    if cambios:
+        bloque_enfoque = f"""
+**Corrige SOLO estas líneas nuevas o modificadas del Pull Request** (el resto del archivo es contexto y NO debe tocarse):
+```
+{cambios}
+```
+"""
+
     mensaje_usuario = f"""
 Corrige y mejora el siguiente archivo de código.
 
@@ -138,13 +173,13 @@ Corrige y mejora el siguiente archivo de código.
 
 **Recomendaciones a aplicar:**
 {bloque_recs}
-
+{bloque_enfoque}
 **Código actual:**
 ```{extension}
 {codigo}
 ```
 
-Devuelve únicamente el código corregido completo, sin explicaciones ni markdown.
+Devuelve únicamente los cambios en el formato de parches @@BUSCAR@@/@@REEMPLAZAR@@/@@FIN@@ indicado.
 """.strip()
 
     try:
@@ -205,8 +240,9 @@ def main():
                 recs = texto
                 break
 
+        cambios = obtener_cambios(ruta)
         codigo_corregido = corregir_con_ia(
-            cliente, contenido, Path(ruta).name, extension, recs
+            cliente, contenido, Path(ruta).name, extension, recs, cambios
         )
 
         if not codigo_corregido:

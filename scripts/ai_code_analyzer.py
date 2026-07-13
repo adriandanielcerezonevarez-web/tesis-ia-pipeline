@@ -14,6 +14,7 @@ import sys
 import json
 import argparse
 import textwrap
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
@@ -118,15 +119,45 @@ def leer_archivo(ruta: str) -> tuple[str, str]:
         return "", ""
 
 
-def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str) -> dict:
+def obtener_cambios(ruta: str) -> str:
+    """
+    Obtiene solo las líneas NUEVAS o MODIFICADAS del archivo respecto a la rama
+    base del Pull Request (por ejemplo main). Devuelve únicamente esas líneas.
+
+    Si no hay contexto de Pull Request o git falla, retorna cadena vacía y el
+    análisis se realiza sobre el archivo completo (comportamiento anterior).
+    """
+    base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    try:
+        if base:
+            subprocess.run(["git", "fetch", "--depth=1", "origin", base],
+                           capture_output=True, timeout=40)
+            referencia = f"origin/{base}"
+        else:
+            referencia = "HEAD~1"
+        salida = subprocess.run(
+            ["git", "diff", "--unified=0", referencia, "--", ruta],
+            capture_output=True, text=True, timeout=40,
+        )
+        # Quedarse solo con las líneas agregadas (empiezan con '+' pero no con '+++')
+        agregadas = [linea[1:] for linea in salida.stdout.splitlines()
+                     if linea.startswith("+") and not linea.startswith("+++")]
+        return "\n".join(agregadas).strip()
+    except Exception:
+        return ""
+
+
+def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str, cambios: str = "") -> dict:
     """
     Envía el código al modelo de IA y retorna el análisis estructurado.
 
     Parámetros:
-        cliente: Instancia del cliente Groq
-        codigo: Contenido del archivo de código
+        cliente: Instancia del cliente de IA
+        codigo: Contenido del archivo de código (contexto completo)
         nombre_archivo: Nombre del archivo para contexto
         extension: Extensión del lenguaje (py, js, java, etc.)
+        cambios: Líneas nuevas/modificadas del PR. Si viene con contenido, el
+                 análisis se enfoca SOLO en esas líneas y usa el resto como contexto.
 
     Retorna:
         dict con el análisis completo o dict de error
@@ -135,6 +166,19 @@ def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str) -
     max_chars = 12000
     if len(codigo) > max_chars:
         codigo = codigo[:max_chars] + f"\n\n[... ARCHIVO TRUNCADO - {len(codigo) - max_chars} caracteres adicionales no mostrados ...]"
+
+    bloque_enfoque = ""
+    if cambios:
+        bloque_enfoque = f"""
+
+ENFOQUE OBLIGATORIO: Esto es un Pull Request. El archivo completo de arriba es SOLO contexto.
+Tus hallazgos, problemas_criticos, recomendaciones y la puntuacion deben referirse UNICAMENTE a
+las siguientes lineas NUEVAS o MODIFICADAS. No reportes nada del codigo que no aparezca aqui:
+
+```
+{cambios}
+```
+"""
 
     mensaje_usuario = f"""
 Analiza el siguiente archivo de código:
@@ -145,7 +189,7 @@ Analiza el siguiente archivo de código:
 ```{extension}
 {codigo}
 ```
-
+{bloque_enfoque}
 Proporciona el análisis completo en el formato JSON especificado.
 """.strip()
 
@@ -435,7 +479,10 @@ def main():
             print(f"  Tamaño: {len(contenido)} caracteres | Lenguaje: {extension.upper()}")
 
         print(f"  Enviando al modelo de IA...")
-        analisis = analizar_con_ia(cliente, contenido, Path(ruta_archivo).name, extension)
+        cambios = obtener_cambios(ruta_archivo)
+        if cambios:
+            print(f"  Enfocando el reporte en {len(cambios.splitlines())} línea(s) cambiada(s) del PR.")
+        analisis = analizar_con_ia(cliente, contenido, Path(ruta_archivo).name, extension, cambios)
 
         if "error" in analisis:
             print(f"  ❌ Error: {analisis['error']}\n")
