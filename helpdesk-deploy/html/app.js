@@ -701,6 +701,18 @@ async function asignarTecnicoA(id, tecnico) {
     }
   }
 }
+function resumenPrioridades() {
+  var alta = 0
+  var media = 0
+  var baja = 0
+  for (var i = 0; i < tickets.length; i++) {
+    if (tickets[i].priority == 'Alta') alta = alta + 1
+    if (tickets[i].priority == 'Media') media = media + 1
+    if (tickets[i].priority == 'Baja') baja = baja + 1
+  }
+  showToast('Prioridades -> Alta: ' + alta + ', Media: ' + media + ', Baja: ' + baja, 'info')
+  return { alta: alta, media: media, baja: baja }
+}
 
 // borrado
 function confirmDelete(id) {
