@@ -58,7 +58,7 @@ function initAuth() {
 
   return true;
 }
-
+efEFefFf
 function logout() {
   if (unsubscribeTickets) unsubscribeTickets();
   try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (_) {}
