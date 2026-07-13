@@ -48,8 +48,20 @@ function initAuth() {
     }
     return false;
   }
-  AppState.session = JSON.parse(s);
-  document.body.classList.add(`role-${AppState.session.role}`);
+  // Parsear y validar la sesión antes de usarla
+  try {
+    const parsed = JSON.parse(s);
+    if (!parsed || typeof parsed.role !== 'string' || typeof parsed.name !== 'string') {
+      throw new Error('Datos de sesión inválidos');
+    }
+    AppState.session = parsed;
+    document.body.classList.add(`role-${AppState.session.role}`);
+  } catch (e) {
+    console.error('Error al cargar sesión:', e);
+    sessionStorage.removeItem(SESSION_KEY);
+    window.location.href = 'login.html';
+    return false;
+  }
 
   const nameEl = document.getElementById('userDisplayName');
   const roleEl = document.getElementById('userDisplayRole');
@@ -59,7 +71,7 @@ function initAuth() {
   if (nameEl) nameEl.textContent = AppState.session.name;
   if (roleEl) roleEl.textContent = AppState.session.role === 'admin' ? 'Administrador' : 'Usuario';
   if (avatarEl) avatarEl.textContent = AppState.session.name.charAt(0).toUpperCase();
-  if (badgeEl) badgeEl.innerHTML = AppState.session.role === 'admin' ? 'Admin' : 'Usuario';
+  if (badgeEl) badgeEl.textContent = AppState.session.role === 'admin' ? 'Admin' : 'Usuario';
 
   return true;
 }
@@ -657,7 +669,7 @@ function cancelForm() {
 }
 
 // ── Asignación rápida de técnico (botón en cada ticket) ──
-const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza','Ing. Revvelion'];
+/* TECNICOS constant retained only in its final definition below; duplicate removed. */
 
 function asignarTecnico(id) {
   if (session.role !== 'admin') { showToast('Acceso denegado', 'error'); return; }
