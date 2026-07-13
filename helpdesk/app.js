@@ -177,7 +177,7 @@ if (window.location.pathname.endsWith('login.html')) {
     else showSection('mytickets');
   });
 }
-
+25161gvhcfcfch
 // tickets de muestra para que no aparezca la app vacía la primera vez
 async function seedDemoData() {
   if (tickets.length > 0) return;
