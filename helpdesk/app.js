@@ -25,7 +25,8 @@ function initFirebase() {
     db = null;
   }
 }
-
+function updateTomar cola () {
+  }
 // pinta el estado online/local en el sidebar
 function updateConnectionBadge(online) {
   const foot = document.getElementById('sidebarConnStatus');
