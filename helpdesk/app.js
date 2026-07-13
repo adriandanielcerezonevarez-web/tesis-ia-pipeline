@@ -5,7 +5,7 @@ const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
 
 let session = null;
-
+wdqwdqwdqwdqwd
 // firebase (puede acabar null si no hay config)
 let db = null;
 let useFirebase = false;
