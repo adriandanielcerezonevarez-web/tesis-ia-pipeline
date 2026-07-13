@@ -4,25 +4,30 @@ const USERS_KEY = 'helpdesk_users';
 const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
 
-let session = null;
-
-// firebase (puede acabar null si no hay config)
-let db = null;
-let useFirebase = false;
-let unsubscribeTickets = null; // para cortar el listener al cerrar sesión
+const AppState = {
+  session: null,
+  db: null,
+  useFirebase: false,
+  unsubscribeTickets: null, // para cortar el listener al cerrar sesión
+  tickets: [],
+  users: [],
+  currentSection: '',
+  editingId: null,
+  pendingDeleteId: null
+};
 
 function initFirebase() {
   if (typeof FIREBASE_CONFIGURED === 'undefined' || !FIREBASE_CONFIGURED) return;
   try {
     // login.html ya pudo haber inicializado firebase
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-    db = firebase.firestore();
-    useFirebase = true;
+    AppState.db = firebase.firestore();
+    AppState.useFirebase = true;
     console.log('firestore conectado');
   } catch (err) {
     console.warn('firebase no va, tiramos de localStorage:', err.message);
-    useFirebase = false;
-    db = null;
+    AppState.useFirebase = false;
+    AppState.db = null;
   }
 }
 
@@ -43,24 +48,24 @@ function initAuth() {
     }
     return false;
   }
-  session = JSON.parse(s);
-  document.body.classList.add(`role-${session.role}`);
+  AppState.session = JSON.parse(s);
+  document.body.classList.add(`role-${AppState.session.role}`);
 
   const nameEl = document.getElementById('userDisplayName');
   const roleEl = document.getElementById('userDisplayRole');
   const avatarEl = document.getElementById('userAvatar');
   const badgeEl = document.getElementById('topbarRoleBadge');
 
-  if (nameEl) nameEl.textContent = session.name;
-  if (roleEl) roleEl.textContent = session.role === 'admin' ? 'Administrador' : 'Usuario';
-  if (avatarEl) avatarEl.textContent = session.name.charAt(0).toUpperCase();
-  if (badgeEl) badgeEl.innerHTML = session.role === 'admin' ? 'Admin' : 'Usuario';
+  if (nameEl) nameEl.textContent = AppState.session.name;
+  if (roleEl) roleEl.textContent = AppState.session.role === 'admin' ? 'Administrador' : 'Usuario';
+  if (avatarEl) avatarEl.textContent = AppState.session.name.charAt(0).toUpperCase();
+  if (badgeEl) badgeEl.innerHTML = AppState.session.role === 'admin' ? 'Admin' : 'Usuario';
 
   return true;
 }
 
 function logout() {
-  if (unsubscribeTickets) unsubscribeTickets();
+  if (AppState.unsubscribeTickets) AppState.unsubscribeTickets();
   try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (_) {}
   sessionStorage.removeItem(SESSION_KEY);
   window.location.href = 'login.html';
@@ -68,14 +73,21 @@ function logout() {
 
 // fallback localStorage
 function dbLoad() {
-  try { return JSON.parse(localStorage.getItem(DB_KEY)) || []; }
-  catch { return []; }
+  try {
+    const data = JSON.parse(localStorage.getItem(DB_KEY));
+    // validar que sea un array de tickets con al menos los campos esperados
+    if (!Array.isArray(data)) return [];
+    return data.filter(t => t && typeof t.id === 'string' && typeof t.title === 'string');
+  } catch (_) {
+    return [];
+  }
 }
 function dbSave(ticketsArr) {
   localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
 }
 function dbNextId() {
-  const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
+  const raw = localStorage.getItem(COUNTER_KEY);
+  const current = raw && /^\d+$/.test(raw) ? parseInt(raw, 10) : 0;
   const next = current + 1;
   localStorage.setItem(COUNTER_KEY, String(next));
   return `TK-${String(next).padStart(4, '0')}`;
@@ -105,11 +117,7 @@ async function fbLoadUsers() {
 }
 
 // estado global
-let tickets = [];
-let users = [];
-let currentSection = '';
-let editingId = null;
-let pendingDeleteId = null;
+/* Estado centralizado en AppState – variables globales eliminadas */
 
 // arranque
 if (window.location.pathname.endsWith('login.html')) {
@@ -237,9 +245,9 @@ const SECTION_META = {
 
 function showSection(name) {
   // los usuarios normales no entran a las pantallas de admin
-  if (session.role === 'user' && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
+  if (AppState.session.role === 'user' && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
 
-  currentSection = name;
+  AppState.currentSection = name;
 
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const navEl = document.getElementById(`nav-${name}`);
@@ -277,7 +285,7 @@ function setupCharCounter() {
 
 // pinta todo en función del rol
 function renderAll() {
-  if (session.role === 'admin') {
+  if (AppState.session.role === 'admin') {
     renderDashboard();
     renderTicketsList();
     renderReports();
@@ -290,7 +298,7 @@ function renderAll() {
 }
 
 function updateNavBadge() {
-  if (session.role === 'admin') {
+  if (AppState.session.role === 'admin') {
     const open = tickets.filter(t => t.status === 'Abierto').length;
     const b = document.getElementById('nav-badge');
     if (b) b.textContent = open;
@@ -303,7 +311,7 @@ function updateNavBadge() {
 
 // dashboard (admin)
 function renderDashboard() {
-  if (session.role !== 'admin') return;
+  if (AppState.session.role !== 'admin') return;
   const total = tickets.length;
   const open = tickets.filter(t => t.status === 'Abierto').length;
   const progress = tickets.filter(t => t.status === 'En Progreso').length;
@@ -342,7 +350,7 @@ function renderDashboard() {
 
 // listado de tickets (admin)
 function renderTicketsList(filtered) {
-  if (session.role !== 'admin') return;
+  if (AppState.session.role !== 'admin') return;
   const list = filtered !== undefined ? filtered : applyFilters(tickets);
   const tbody = document.getElementById('ticketsTableBody');
   const empty = document.getElementById('emptyState');
@@ -534,7 +542,7 @@ function resetForm() {
   if (document.getElementById('ticketStatus')) document.getElementById('ticketStatus').value = 'Abierto';
 
   // si es usuario, autorrellenamos solicitante y email y los bloqueamos
-  if (session.role === 'user') {
+  if (AppState.session.role === 'user') {
     const reqField = document.getElementById('ticketRequester');
     const mailField = document.getElementById('ticketEmail');
     if (reqField) { reqField.value = session.name; reqField.readOnly = true; }
@@ -636,7 +644,7 @@ async function saveTicket(e) {
     }
     renderAll();
   }
-  efewfewfew
+  /* removed stray characters */
 
   editingId = null;
   if (!useFirebase) showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
@@ -674,7 +682,7 @@ function cerrarMenuAsignar() {
 
 async function asignarTecnicoA(id, tecnico) {
   cerrarMenuAsignar();
-  if (session.role !== 'admin') return;
+  if (AppState.session.role !== 'admin') return;
   if (useFirebase) {
     try {
       await db.collection('tickets').doc(id).update({ assigned: tecnico, updatedAt: new Date().toISOString() });
@@ -695,7 +703,7 @@ async function asignarTecnicoA(id, tecnico) {
 
 // borrado
 function confirmDelete(id) {
-  if (session.role !== 'admin') return;
+  if (AppState.session.role !== 'admin') return;
   pendingDeleteId = id;
   openModal('confirmModal');
 }
@@ -720,7 +728,7 @@ async function executeDelete() {
 
 // reportes
 function renderReports() {
-  if (session.role !== 'admin') return;
+  if (AppState.session.role !== 'admin') return;
   const total = tickets.length;
   const open = tickets.filter(t => t.status === 'Abierto').length;
   const progress = tickets.filter(t => t.status === 'En Progreso').length;
@@ -780,7 +788,7 @@ async function clearAllData() {
 
 // gestión de usuarios
 function renderUsersList() {
-  if (session.role !== 'admin') return;
+  if (AppState.session.role !== 'admin') return;
   const tbody = document.getElementById('usersTableBody');
   if (!tbody) return;
   tbody.innerHTML = users.map(u => `
