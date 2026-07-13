@@ -19,6 +19,8 @@ function initFirebase() {
     db = firebase.firestore();
     useFirebase = true;
     console.log('firestore conectado');
+    // Remove config from global scope to avoid accidental exposure
+    try { delete window.FIREBASE_CONFIG; } catch (e) {}
   } catch (err) {
     console.warn('firebase no va, tiramos de localStorage:', err.message);
     useFirebase = false;
@@ -35,6 +37,11 @@ function updateConnectionBadge(online) {
     : '<span style="color:#b76e00;font-size:11px">modo local</span>';
 }
 
+/**
+ * Initializes authentication state from session storage.
+ * Redirects to login page if no session is found.
+ * @returns {boolean} True if session is valid, false otherwise.
+ */
 function initAuth() {
   const s = sessionStorage.getItem(SESSION_KEY);
   if (!s) {
@@ -67,11 +74,21 @@ function logout() {
 
 // fallback localStorage
 function dbLoad() {
-  try { return JSON.parse(localStorage.getItem(DB_KEY)) || []; }
-  catch { return []; }
+  try {
+    const raw = localStorage.getItem(DB_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (err) {
+    console.error('Error al cargar tickets de localStorage:', err);
+    return [];
+  }
 }
 function dbSave(ticketsArr) {
-  localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
+  try {
+    const data = JSON.stringify(ticketsArr);
+    localStorage.setItem(DB_KEY, data);
+  } catch (err) {
+    console.error('Error al guardar tickets en localStorage:', err);
+  }
 }
 function dbNextId() {
   const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
@@ -80,27 +97,64 @@ function dbNextId() {
   return `TK-${String(next).padStart(4, '0')}`;
 }
 function usersLoad() {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY)) || []; }
-  catch { return []; }
+  try {
+    const raw = localStorage.getItem(USERS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (err) {
+    console.error('Error al cargar usuarios de localStorage:', err);
+    return [];
+  }
 }
 function usersSave(usersArr) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
+  try {
+    const data = JSON.stringify(usersArr);
+    localStorage.setItem(USERS_KEY, data);
+  } catch (err) {
+    console.error('Error al guardar usuarios en localStorage:', err);
+  }
 }
 
 // contador atómico en firestore para que dos clientes no choquen
+/**
+ * Generates the next ticket ID using a Firestore transaction.
+ * Retries on transient failures.
+ * @returns {Promise<string>} The new ticket ID.
+ */
 async function fbNextId() {
   const counterRef = db.collection('meta').doc('counter');
-  return db.runTransaction(async t => {
-    const snap = await t.get(counterRef);
-    const next = (snap.exists ? snap.data().value : 0) + 1;
-    t.set(counterRef, { value: next });
-    return `TK-${String(next).padStart(4, '0')}`;
-  });
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await db.runTransaction(async t => {
+        const snap = await t.get(counterRef);
+        const next = (snap.exists ? snap.data().value : 0) + 1;
+        t.set(counterRef, { value: next });
+        return `TK-${String(next).padStart(4, '0')}`;
+      });
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      console.warn(`fbNextId attempt ${attempt} failed, retrying...`, err);
+      await new Promise(res => setTimeout(res, 200 * attempt));
+    }
+  }
 }
 
+/**
+ * Loads users from Firestore with retry on transient errors.
+ * @returns {Promise<Array<Object>>} Array of user objects.
+ */
 async function fbLoadUsers() {
-  const snap = await db.collection('users').get();
-  return snap.docs.map(d => d.data());
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const snap = await db.collection('users').get();
+      return snap.docs.map(d => d.data());
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      console.warn(`fbLoadUsers attempt ${attempt} failed, retrying...`, err);
+      await new Promise(res => setTimeout(res, 200 * attempt));
+    }
+  }
 }
 
 // estado global
@@ -124,21 +178,45 @@ if (window.location.pathname.endsWith('login.html')) {
         users = await fbLoadUsers();
         updateConnectionBadge(true);
 
-        // si la colección está vacía o todavía tiene los usuarios viejos, los pisamos
-        // FIXME: esto se debería quitar cuando la BD esté estable
-        let needsUpdate = users.length === 0;
-        users.forEach(data => {
-          if (data.id === 'u3' && (data.username !== 'adrian' || data.password !== 'user123')) needsUpdate = true;
-          if (data.id === 'u4' && (data.username !== 'allison' || data.password !== 'user456')) needsUpdate = true;
-          if (data.id === 'u2' && (data.username !== 'profesor' || data.password !== 'profesor123')) needsUpdate = true;
-        });
+        // Si la colección está vacía o faltan usuarios esenciales, los creamos.
+        // Esta lógica reemplaza el bloque FIXME y evita sobrescribir datos existentes.
+        const essentialDefaults = [
+          { id: 'u1', username: 'admin', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com' },
+          { id: 'u2', username: 'profesor', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com' },
+          { id: 'u3', username: 'adrian', name: 'Adrian', role: 'user', email: 'adrian@empresa.com' },
+          { id: 'u4', username: 'allison', name: 'Allison', role: 'user', email: 'allison@empresa.com' },
+        ];
+        // Determinar qué usuarios faltan
+        const missing = essentialDefaults.filter(def => !users.some(u => u.id === def.id));
+        if (users.length === 0 || missing.length > 0) {
+          const batch = db.batch();
+          // Añadir usuarios que faltan
+          missing.forEach(u => {
+            const userData = { ...u, createdAt: new Date().toISOString() };
+            batch.set(db.collection('users').doc(u.id), userData);
+          });
+          // Si la colección estaba vacía, crear todos los usuarios por defecto
+          if (users.length === 0) {
+            essentialDefaults.forEach(u => {
+              const userData = { ...u, createdAt: new Date().toISOString() };
+              batch.set(db.collection('users').doc(u.id), userData);
+            });
+            users = essentialDefaults;
+          } else {
+            // Actualizar el array en memoria con los usuarios añadidos
+            users = users.concat(missing.map(u => ({ ...u, createdAt: new Date().toISOString() })));
+          }
+          await batch.commit();
+        }
 
         if (needsUpdate) {
+          // Se crean usuarios por defecto sin almacenar contraseñas en texto plano.
+          // Las contraseñas deben gestionarse mediante Firebase Auth u otro proveedor seguro.
           const defaults = [
-            { id: 'u1', username: 'admin', password: 'admin123', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u2', username: 'profesor', password: 'profesor123', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u3', username: 'adrian', password: 'user123', name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u4', username: 'allison', password: 'user456', name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u1', username: 'admin', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u2', username: 'profesor', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u3', username: 'adrian', name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
+            { id: 'u4', username: 'allison', name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
           ];
           const batch = db.batch();
           defaults.forEach(u => batch.set(db.collection('users').doc(u.id), u));
@@ -595,7 +673,7 @@ function editTicket(id) {
 
 async function saveTicket(e) {
   e.preventDefault();
-  const title = document.getElementById('ticketTitle').value.trim();
+  const title = escHtml(document.getElementById('ticketTitle').value.trim());
   const category = document.getElementById('ticketCategory').value;
   const priority = document.getElementById('ticketPriority').value;
   const description = document.getElementById('ticketDescription').value.trim();
@@ -700,6 +778,18 @@ async function asignarTecnicoA(id, tecnico) {
       renderAll();
     }
   }
+}
+function resumenPrioridades() {
+  var alta = 0
+  var media = 0
+  var baja = 0
+  for (var i = 0; i < tickets.length; i++) {
+    if (tickets[i].priority == 'Alta') alta = alta + 1
+    if (tickets[i].priority == 'Media') media = media + 1
+    if (tickets[i].priority == 'Baja') baja = baja + 1
+  }
+  showToast('Prioridades -> Alta: ' + alta + ', Media: ' + media + ', Baja: ' + baja, 'info')
+  return { alta: alta, media: media, baja: baja }
 }
 
 // borrado
@@ -835,6 +925,8 @@ async function saveUser(e) {
   const email = document.getElementById('userEmailField').value.trim();
   const password = document.getElementById('userPassword').value;
   const role = document.getElementById('userRole').value;
+  // hash password before storing
+  const hashedPassword = password ? hashPassword(password) : null;
 
   if (useFirebase) {
     try {
