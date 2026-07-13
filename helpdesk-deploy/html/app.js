@@ -27,7 +27,7 @@ function initFirebase() {
     db = null;
   }
 }
-
+jeremy
 // pinta el estado online/local en el sidebar
 function updateConnectionBadge(online) {
   const foot = document.getElementById('sidebarConnStatus');
