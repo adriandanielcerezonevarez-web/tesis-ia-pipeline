@@ -152,7 +152,7 @@ def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str, c
         cliente: Instancia del cliente de IA
         codigo: Contenido del archivo de código (contexto completo)
         nombre_archivo: Nombre del archivo para contexto
-        extension: Extensión del lenguaje (py, js, java, etc.)
+        extension: Extensión del lenguaje (py, js, java, html, css, etc.)
         cambios: Líneas nuevas/modificadas del PR. Si viene con contenido, el
                  análisis se enfoca SOLO en esas líneas y usa el resto como contexto.
 
