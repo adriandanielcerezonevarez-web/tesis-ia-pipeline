@@ -647,6 +647,28 @@ function cancelForm() {
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
 }
 
+/**
+* Calcula un resumen de los tickets agrupados por prioridad
+* y lo muestra como una notificación en pantalla.
+* @returns {{alta: number, media: number, baja: number}} Conteo por
+prioridad.
+*/
+function resumenPorPrioridad() {
+ const conteo = { alta: 0, media: 0, baja: 0 };
+ if (!Array.isArray(tickets)) {
+ showToast('No hay tickets disponibles', 'info');
+ return conteo;
+ }
+ for (const ticket of tickets) {
+ const prioridad = (ticket.priority || '').toLowerCase();
+ if (prioridad === 'alta') conteo.alta += 1;
+ else if (prioridad === 'media') conteo.media += 1;
+ else if (prioridad === 'baja') conteo.baja += 1;
+ }
+ showToast(`Alta: ${conteo.alta} · Media: ${conteo.media} · Baja:
+${conteo.baja}`, 'success');
+ return conteo;
+}
 
 
 // ── Asignación rápida de técnico (botón en cada ticket) ──
