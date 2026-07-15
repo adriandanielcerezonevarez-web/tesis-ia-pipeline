@@ -746,44 +746,6 @@ function exportJSON() {
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
 
-/**
- * Convierte un ticket en una fila CSV escapada y sanitizada.
- * @param {Object} t - Objeto ticket esperado con las propiedades usadas.
- * @returns {string} Fila CSV lista para ser incluida en el archivo.
- */
-function ticketToCsvRow(t) {
-  // Sanitiza valores que podrían iniciar con =,+,-,@ para prevenir CSV Injection
-  const sanitize = v => {
-    const s = String(v ?? '');
-    return /^[=+\-@]/.test(s) ? `'${s}` : s;
-  };
-  const values = [
-    sanitize(t.id),
-    sanitize(t.title),
-    sanitize(t.category),
-    sanitize(t.priority),
-    sanitize(t.status),
-    sanitize(t.assigned || ''),
-    sanitize(t.requester || ''),
-    sanitize(formatDateFull(t.createdAt))
-  ];
-  // Escapa comillas dobles según RFC4180
-  return values.map(v => `"${v.replace(/"/g, '""')}"`).join(',');
-}
-function exportCSV() {
-  try {
-    if (!Array.isArray(tickets)) {
-      throw new Error('No hay tickets para exportar');
-    }
-    const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-    const rows = tickets.map(ticketToCsvRow);
-    const csvContent = [headers.join(','), ...rows].join('\r\n');
-    // BOM para que Excel detecte UTF-8
-    downloadFile('tickets.csv', '\uFEFF' + csvContent, 'text/csv;charset=utf-8');
-  } catch (err) {
-    console.error('Error al exportar CSV:', err);
-    showToast('No se pudo exportar el CSV: ' + err.message, 'error');
-  }
 }
 function downloadFile(fname, content, type) {
   const blob = new Blob([content], { type });
