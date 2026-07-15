@@ -751,24 +751,6 @@ function exportJSON() {
  * @param {Object} t - Objeto ticket esperado con las propiedades usadas.
  * @returns {string} Fila CSV lista para ser incluida en el archivo.
  */
-function ticketToCsvRow(t) {
-  // Sanitiza valores que podrían iniciar con =,+,-,@ para prevenir CSV Injection
-  const sanitize = v => {
-    const s = String(v ?? '');
-    return /^[=+\-@]/.test(s) ? `'${s}` : s;
-  };
-  const values = [
-    sanitize(t.id),
-    sanitize(t.title),
-    sanitize(t.category),
-    sanitize(t.priority),
-    sanitize(t.status),
-    sanitize(t.assigned || ''),
-    sanitize(t.requester || ''),
-    sanitize(formatDateFull(t.createdAt))
-  ];
-  // Escapa comillas dobles según RFC4180
-  return values.map(v => `"${v.replace(/"/g, '""')}"`).join(',');
 }
 function exportCSV() {
   try {
