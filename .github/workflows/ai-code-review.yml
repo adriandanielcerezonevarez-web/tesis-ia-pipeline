@@ -93,7 +93,7 @@ jobs:
           fi
 
           # Filtrar solo archivos de código fuente soportados
-          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs|html|css""
+          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs"
           ARCHIVOS_CODIGO=$(echo "$ARCHIVOS" | grep -E "\.(${EXTENSIONES})$" | head -20 || true)
 
           if [ -z "$ARCHIVOS_CODIGO" ]; then
@@ -158,7 +158,7 @@ jobs:
             try {
               reporte = fs.readFileSync('reporte-ia.md', 'utf8');
             } catch (e) {
-              reporte = '⚠️ No se pudo generar el reporte de análisis de IA.';
+              reporte = ' No se pudo generar el reporte de análisis de IA.';
             }
 
             // Limitar tamaño del comentario (GitHub permite máx. 65536 chars)
@@ -244,22 +244,22 @@ jobs:
           echo "Resultado análisis IA:       $IA"
 
           if [ "$TRADICIONAL" == "failure" ]; then
-            echo "❌ El análisis estático (linting/tests) falló."
+            echo " El análisis estático (linting/tests) falló."
             exit 1
           fi
 
           if [ "$IA" == "failure" ]; then
-            echo "❌ El análisis de IA detectó problemas críticos de calidad."
+            echo " El análisis de IA detectó problemas críticos de calidad."
             exit 1
           fi
 
-          echo "✅ Todos los análisis pasaron correctamente. El código está listo."
+          echo " Todos los análisis pasaron correctamente. El código está listo."
 
   # ──────────────────────────────────────────────────────────
   #  JOB 4: Despliegue automático al VPS (solo si el gate pasa)
   # ──────────────────────────────────────────────────────────
   despliegue:
-    name: "🚀 Despliegue Automático al VPS"
+    name: " Despliegue Automático al VPS"
     runs-on: ubuntu-latest
     needs: quality-gate
     # Solo despliega en push a main y si el Quality Gate pasó
@@ -277,7 +277,7 @@ jobs:
           command_timeout: "20m"
           script: |
             set -e
-            echo "🚀 Iniciando despliegue automático..."
+            echo " Iniciando despliegue automático..."
             REPO=/root/tesis-ia-pipeline
             if [ ! -d "$REPO/.git" ]; then
               git clone https://github.com/adriandanielcerezonevarez-web/tesis-ia-pipeline.git "$REPO"
@@ -290,4 +290,4 @@ jobs:
             cd "$REPO/helpdesk-deploy"
             docker compose up -d --build --remove-orphans
             docker image prune -f
-            echo "✅ Despliegue completado. HelpDesk en https://helpdesk-arce.duckdns.org"
+            echo " Despliegue completado. HelpDesk en https://helpdesk-arce.duckdns.org"
