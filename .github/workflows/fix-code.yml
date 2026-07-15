@@ -83,7 +83,7 @@ jobs:
         run: |
           git fetch origin main --depth=1 || true
           ARCHIVOS=$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
-          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs"
+          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs|html|css"
           LISTA=$(echo "$ARCHIVOS" | grep -E "\.(${EXTENSIONES})$" | tr '\n' ' ' | xargs || true)
           echo "Archivos detectados: $LISTA"
           echo "lista=$LISTA" >> $GITHUB_OUTPUT
