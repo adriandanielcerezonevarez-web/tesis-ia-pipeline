@@ -93,7 +93,7 @@ jobs:
           fi
 
           # Filtrar solo archivos de código fuente soportados
-          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs"
+          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs|html|css""
           ARCHIVOS_CODIGO=$(echo "$ARCHIVOS" | grep -E "\.(${EXTENSIONES})$" | head -20 || true)
 
           if [ -z "$ARCHIVOS_CODIGO" ]; then
