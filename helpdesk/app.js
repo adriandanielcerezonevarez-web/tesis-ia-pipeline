@@ -4,26 +4,36 @@ const USERS_KEY = 'helpdesk_users';
 const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
 
-let session = null;
+const state = {
+  session: null,
+  db: null,
+  useFirebase: false,
+  unsubscribeTickets: null, // para cortar el listener al cerrar sesión
+};
+// Declaraciones explícitas de variables que antes eran implícitas
+let session = state.session;
+let db = state.db;
+let useFirebase = state.useFirebase;
+let unsubscribeTickets = state.unsubscribeTickets;
 
-// firebase (puede acabar null si no hay config)
-let db = null;
-let useFirebase = false;
-let unsubscribeTickets = null; // para cortar el listener al cerrar sesión
+/* Removed duplicate global variables. Access shared state via `state` object. */
 
 function initFirebase() {
   if (typeof FIREBASE_CONFIGURED === 'undefined' || !FIREBASE_CONFIGURED) return;
   try {
     // login.html ya pudo haber inicializado firebase
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-    db = firebase.firestore();
-    useFirebase = true;
+    state.db = firebase.firestore();
+    state.useFirebase = true;
     console.log('firestore conectado');
   } catch (err) {
     console.warn('firebase no va, tiramos de localStorage:', err.message);
-    useFirebase = false;
-    db = null;
+    state.useFirebase = false;
+    state.db = null;
   }
+  // actualizar referencias
+  db = state.db;
+  useFirebase = state.useFirebase;
 }
 
 // pinta el estado online/local en el sidebar
@@ -43,8 +53,9 @@ function initAuth() {
     }
     return false;
   }
-  session = JSON.parse(s);
-  document.body.classList.add(`role-${session.role}`);
+  state.session = JSON.parse(s);
+  session = state.session; // mantener variable local para compatibilidad
+  document.body.classList.add(`role-${state.session.role}`);
 
   const nameEl = document.getElementById('userDisplayName');
   const roleEl = document.getElementById('userDisplayRole');
@@ -60,7 +71,7 @@ function initAuth() {
 }
 
 function logout() {
-  if (unsubscribeTickets) unsubscribeTickets();
+  if (state.unsubscribeTickets) state.unsubscribeTickets();
   try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (_) {}
   sessionStorage.removeItem(SESSION_KEY);
   window.location.href = 'login.html';
@@ -90,7 +101,7 @@ function usersSave(usersArr) {
 
 // contador atómico en firestore para que dos clientes no choquen
 async function fbNextId() {
-  const counterRef = db.collection('meta').doc('counter');
+  const counterRef = state.db.collection('meta').doc('counter');
   return db.runTransaction(async t => {
     const snap = await t.get(counterRef);
     const next = (snap.exists ? snap.data().value : 0) + 1;
@@ -116,19 +127,19 @@ if (window.location.pathname.endsWith('login.html')) {
   // logic handled in login.html inline script
 } else {
   document.addEventListener('DOMContentLoaded', async () => {
-    if (!initAuth()) return;
+if (!initAuth()) return;
 
-    initFirebase();
+initFirebase();
 
-    // Guard de seguridad: si hay Firebase pero no hay sesión autenticada, volver al login.
-    if (useFirebase && firebase.auth) {
+// Guard de seguridad: si hay Firebase pero no hay sesión autenticada, volver al login.
+if (state.useFirebase && firebase.auth) {
       if (!firebase.auth().currentUser) {
         await new Promise(res => { const off = firebase.auth().onAuthStateChanged(() => { off(); res(); }); });
       }
       if (!firebase.auth().currentUser) { logout(); return; }
     }
 
-    if (useFirebase) {
+    if (state.useFirebase) {
       try {
         users = await fbLoadUsers();
         updateConnectionBadge(true);
@@ -185,9 +196,9 @@ async function seedDemoData() {
     { title: 'No enciende la laptop', category: 'Hardware', priority: 'Alta', status: 'Abierto', assigned: 'profesor', requester: 'Adrian', requesterId: 'u3', email: 'adrian@empresa.com', description: 'La laptop no enciende al presionar el botón de encendido.', notes: '', createdAt: new Date(Date.now() - 86400000 * 3).toISOString() },
     { title: 'Actualización falla', category: 'Software', priority: 'Baja', status: 'Resuelto', assigned: 'admin', requester: 'Allison', requesterId: 'u4', email: 'allison@empresa.com', description: 'Error 0x8007 al actualizar Windows.', notes: 'Limpieza de cache.', createdAt: new Date(Date.now() - 86400000 * 5).toISOString() }
   ];
-  if (useFirebase) {
-    try {
-      const batch = db.batch();
+if (state.useFirebase) {
+  try {
+    const batch = state.db.batch();
       for (const d of demos) {
         const id = await fbNextId();
         batch.set(db.collection('tickets').doc(id), { id, ...d });
@@ -585,25 +596,31 @@ function editTicket(id) {
 
 async function saveTicket(e) {
   e.preventDefault();
-  const title = document.getElementById('ticketTitle').value.trim();
-  const category = document.getElementById('ticketCategory').value;
-  const priority = document.getElementById('ticketPriority').value;
-  const description = document.getElementById('ticketDescription').value.trim();
+  // Sanitización básica de los campos de texto
+  const rawTitle = document.getElementById('ticketTitle').value.trim();
+  const rawCategory = document.getElementById('ticketCategory').value;
+  const rawPriority = document.getElementById('ticketPriority').value;
+  const rawDescription = document.getElementById('ticketDescription').value.trim();
+
+  const title = escHtml(rawTitle);
+  const category = escHtml(rawCategory);
+  const priority = escHtml(rawPriority);
+  const description = escHtml(rawDescription);
 
   let status = document.getElementById('ticketStatus')?.value || 'Abierto';
-  let assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
-  let requester = document.getElementById('ticketRequester')?.value.trim() || session.name;
-  let email = document.getElementById('ticketEmail')?.value.trim() || '';
-  let notes = document.getElementById('ticketNotes')?.value.trim() || '';
+  let assigned = escHtml(document.getElementById('ticketAssigned')?.value.trim() || '');
+  let requester = escHtml(document.getElementById('ticketRequester')?.value.trim() || session.name);
+  let email = escHtml(document.getElementById('ticketEmail')?.value.trim() || '');
+  let notes = escHtml(document.getElementById('ticketNotes')?.value.trim() || '');
   let requesterId = session.role === 'admin' ? null : session.userId;
 
-  if (useFirebase) {
+  if (state.useFirebase) {
     try {
       if (editingId) {
         const updateData = session.role === 'admin'
           ? { title, category, priority, status, assigned, requester, email, description, notes, updatedAt: new Date().toISOString() }
           : { title, category, priority, description, updatedAt: new Date().toISOString() };
-        await db.collection('tickets').doc(editingId).update(updateData);
+        await state.db.collection('tickets').doc(editingId).update(updateData);
         showToast('Ticket actualizado', 'success');
       } else {
         const id = await fbNextId();
@@ -751,32 +768,26 @@ function exportJSON() {
  * @param {Object} t - Objeto ticket esperado con las propiedades usadas.
  * @returns {string} Fila CSV lista para ser incluida en el archivo.
  */
-function ticketToCsvRow(t) {
-  // Sanitiza valores que podrían iniciar con =,+,-,@ para prevenir CSV Injection
-  const sanitize = v => {
-    const s = String(v ?? '');
-    return /^[=+\-@]/.test(s) ? `'${s}` : s;
-  };
-  const values = [
-    sanitize(t.id),
-    sanitize(t.title),
-    sanitize(t.category),
-    sanitize(t.priority),
-    sanitize(t.status),
-    sanitize(t.assigned || ''),
-    sanitize(t.requester || ''),
-    sanitize(formatDateFull(t.createdAt))
-  ];
-  // Escapa comillas dobles según RFC4180
-  return values.map(v => `"${v.replace(/"/g, '""')}"`).join(',');
-}
 function exportCSV() {
   try {
-    if (!Array.isArray(tickets)) {
+    if (!Array.isArray(tickets) || tickets.length === 0) {
       throw new Error('No hay tickets para exportar');
     }
     const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-    const rows = tickets.map(ticketToCsvRow);
+    const rows = tickets.map(ticket => {
+      // Sanitizamos cada campo antes de generar CSV
+      const safe = {
+        id: escHtml(ticket.id),
+        title: escHtml(ticket.title),
+        category: escHtml(ticket.category),
+        priority: escHtml(ticket.priority),
+        status: escHtml(ticket.status),
+        assigned: escHtml(ticket.assigned || ''),
+        requester: escHtml(ticket.requester || ''),
+        createdAt: escHtml(ticket.createdAt)
+      };
+      return `${safe.id},${safe.title},${safe.category},${safe.priority},${safe.status},${safe.assigned},${safe.requester},${safe.createdAt}`;
+    });
     const csvContent = [headers.join(','), ...rows].join('\r\n');
     // BOM para que Excel detecte UTF-8
     downloadFile('tickets.csv', '\uFEFF' + csvContent, 'text/csv;charset=utf-8');
