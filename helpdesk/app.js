@@ -647,27 +647,7 @@ function cancelForm() {
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
 }
 
-/**
- * Calcula un resumen de los tickets agrupados por prioridad
- * y lo muestra como una notificación en pantalla.
- * @returns {{alta: number, media: number, baja: number}} Conteo por prioridad.
- */
-function resumenPorPrioridad() {
-  const conteo = { alta: 0, media: 0, baja: 0 };
-  if (!Array.isArray(tickets)) {
-    showToast('No hay tickets disponibles', 'info');
-    return conteo;
-  }
-  for (const ticket of tickets) {
-    const prioridad = (ticket.priority || '').toLowerCase();
-    if (prioridad === 'alta') conteo.alta += 1;
-    else if (prioridad === 'media') conteo.media += 1;
-    else if (prioridad === 'baja') conteo.baja += 1;
-  }
-  showToast(`Alta: ${conteo.alta} · Media: ${conteo.media} · Baja: ${conteo.baja}`, 'success');
-  return conteo;
-}
-}
+
 
 
 // ── Asignación rápida de técnico (botón en cada ticket) ──
@@ -765,13 +745,7 @@ function exportJSON() {
   const data = JSON.stringify({ tickets, users }, null, 2);
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
-function exportCSV() {
-  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
-}
+
 function downloadFile(fname, content, type) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
