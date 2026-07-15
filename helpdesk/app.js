@@ -812,6 +812,7 @@ async function clearAllData() {
     showToast('Base de datos depurada', 'info');
   }
 }
+25252543wdwed
 
 // gestión de usuarios
 function renderUsersList() {
