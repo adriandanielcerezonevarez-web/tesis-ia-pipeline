@@ -646,42 +646,7 @@ function cancelForm() {
   editingId = null;
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
 }
-/**
- * Calcula un resumen de los tickets agrupados por prioridad y lo muestra como una notificación.
- *
- * @param {Array<Object>} ticketsArray - Array de tickets a procesar.
- * @returns {{alta: number, media: number, baja: number}} Objeto con el conteo por prioridad.
- *
- * @throws {Error} Si ocurre un error inesperado al mostrar el toast.
- *
- * @dependency showToast - Función externa utilizada para notificar al usuario.
- */
-function resumenPorPrioridad(ticketsArray) {
-  const conteo = { alta: 0, media: 0, baja: 0 };
-  if (!Array.isArray(ticketsArray)) {
-    try {
-      showToast('No hay tickets disponibles', 'info');
-    } catch (e) {
-      console.error('Error al mostrar toast:', e);
-    }
-    return conteo;
-  }
-  for (const ticket of ticketsArray) {
-    const prioridad = (ticket.priority || '').toLowerCase();
-    if (prioridad === 'alta') conteo.alta += 1;
-    else if (prioridad === 'media') conteo.media += 1;
-    else if (prioridad === 'baja') conteo.baja += 1;
-    else {
-      console.warn(`Prioridad desconocida: "${ticket.priority}"`);
-    }
-  }
-  try {
-    showToast(`Alta: ${conteo.alta} · Media: ${conteo.media} · Baja: ${conteo.baja}`, 'success');
-  } catch (e) {
-    console.error('Error al mostrar toast:', e);
-  }
-  return conteo;
-}
+
 
 
 // ── Asignación rápida de técnico (botón en cada ticket) ──
