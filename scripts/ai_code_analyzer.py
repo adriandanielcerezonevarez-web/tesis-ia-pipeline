@@ -33,7 +33,7 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 
 MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
 TEMPERATURA = 0                           # Temperatura 0 = máxima consistencia (igual que el validador)
-MAX_TOKENS = 8000                         # Amplio: gpt-oss "razona" antes de responder
+MAX_TOKENS = 9000                        # Amplio: gpt-oss "razona" antes de responder
 
 # Criterios de análisis que evalúa la IA
 DIMENSIONES_ANALISIS = [
