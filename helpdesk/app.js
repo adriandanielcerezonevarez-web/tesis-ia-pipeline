@@ -745,12 +745,53 @@ function exportJSON() {
   const data = JSON.stringify({ tickets, users }, null, 2);
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
-function exportCSV() {
+
+/**
+ * Escapa valores para CSV según RFC 4180.
+ * Convierte comillas dobles en dos comillas y envuelve el valor entre comillas.
+ * También sanitiza saltos de línea.
+ */
+function escapeCsvValue(value) {
+  const str = String(value ?? '');
+  const escaped = str.replace(/"/g, '""').replace(/\r?\n/g, ' ');
+  return `"${escaped}"`;
+}
+
+/**
+ * Genera una cadena CSV a partir de un arreglo de tickets.
+ * @param {Array} ticketsArray - Arreglo de objetos ticket.
+ * @returns {string} CSV listo para descargar.
+ */
+function generateCsv(ticketsArray) {
+  const fields = ['id', 'title', 'category', 'priority', 'status', 'assigned', 'requester', 'createdAt'];
   const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  const rows = ticketsArray.map(t => {
+    const values = [
+      t.id,
+      t.title,
+      t.category,
+      t.priority,
+      t.status,
+      t.assigned || '',
+      t.requester || '',
+      formatDateFull(t.createdAt)
+    ];
+    return values.map(escapeCsvValue).join(',');
+  });
+  return [headers.join(','), ...rows].join('\r\n');
+}
+function exportCSV() {
+  // Exportar tickets a CSV con validación y manejo de errores
+  try {
+    if (!Array.isArray(tickets)) {
+      throw new Error('Los datos de tickets no están disponibles');
+    }
+    const csv = generateCsv(tickets);
+    downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  } catch (err) {
+    console.error('exportCSV error:', err);
+    showToast('Error al generar CSV: ' + err.message, 'error');
+  }
 }
 
 async function clearAllData() {
