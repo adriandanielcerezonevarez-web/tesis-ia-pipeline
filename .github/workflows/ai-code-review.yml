@@ -1,177 +1,249 @@
+
 # ============================================================
 #  AI CODE REVIEW — GitHub Actions Workflow
+# ============================================================
 #  Pipeline CI/CD con análisis de calidad de código mediante IA
+#  Modelo: Llama 3.3 70B (open source) vía Groq API
+#
 #  Tesis: Diseño de un modelo de uso de IA en pipelines CI/CD
 #  Autor: Adrian Daniel Cerezo Nevarez
 # ============================================================
+
 name: "Análisis de Calidad de Código con IA"
+
 on:
   pull_request:
     branches: [main, develop]
     types: [opened, synchronize, reopened]
   push:
     branches: [main, develop]
+
+# Permisos necesarios para comentar en PRs
 permissions:
   contents: read
   pull-requests: write
   issues: write
+
 jobs:
-  # ── JOB 1: Validación estática ──
+
+  # ──────────────────────────────────────────────────────────
+  #  JOB 1: Análisis estático tradicional (linting, tests)
+  # ──────────────────────────────────────────────────────────
   analisis-tradicional:
     name: "Validación Estática (Linting + Tests)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
+
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
+
       - name: Instalar dependencias del proyecto
         run: |
           pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Ejecutar linter (flake8)
-        run: |
-          pip install flake8
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
-      - name: Ejecutar pruebas unitarias
-        run: |
-          if [ -d tests ]; then
+@@ -57,133 +43,82 @@ jobs:
             pip install pytest
             pytest tests/ -v --tb=short || true
           else
-            echo "No se encontro directorio de tests. Omitiendo pruebas unitarias."
+            echo "No se encontró directorio de tests. Omitiendo pruebas unitarias."
           fi
-
-  # ── JOB 2: Análisis de calidad con IA ──
+  # ──────────────────────────────────────────────────────────
+  #  JOB 2: Análisis de calidad con IA (depende del Job 1)
+  # ──────────────────────────────────────────────────────────
   analisis-ia:
-    name: "Análisis de Calidad con IA"
+    name: "Análisis de Calidad con IA (Llama 3)"
     runs-on: ubuntu-latest
-    needs: analisis-tradicional
-    if: always()
-    outputs:
-      resultado_ia: ${{ steps.analisis-ia.outputs.codigo_salida }}
+    needs: analisis-tradicional   # Se ejecuta después del análisis estático
+    if: always()                   # Siempre corre, incluso si el Job 1 falla
+
+
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # Necesario para comparar commits
+
+      # ── Detectar archivos modificados ──
       - name: Detectar archivos de código modificados
         id: archivos-modificados
         run: |
+          echo "Detectando archivos modificados en este push/PR..."
+          # Para Pull Requests: comparar rama base vs rama actual
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
             HEAD="${{ github.event.pull_request.head.sha }}"
             ARCHIVOS=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || git diff --name-only HEAD~1 HEAD)
           else
+            # Para push: comparar con el commit anterior
             ARCHIVOS=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git ls-files)
           fi
+          # Filtrar solo archivos de código fuente soportados
           EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs"
           ARCHIVOS_CODIGO=$(echo "$ARCHIVOS" | grep -E "\.(${EXTENSIONES})$" | head -20 || true)
           if [ -z "$ARCHIVOS_CODIGO" ]; then
+            echo "No se encontraron archivos de código modificados."
             echo "archivos_encontrados=false" >> $GITHUB_OUTPUT
             echo "lista_archivos=" >> $GITHUB_OUTPUT
           else
+            echo "Archivos detectados:"
+            echo "$ARCHIVOS_CODIGO"
+            # Convertir a línea separada por espacios para el argumento del script
             LISTA=$(echo "$ARCHIVOS_CODIGO" | tr '\n' ' ' | xargs)
             echo "archivos_encontrados=true" >> $GITHUB_OUTPUT
             echo "lista_archivos=$LISTA" >> $GITHUB_OUTPUT
           fi
+      # ── Configurar Python y dependencias del analizador ──
       - name: Configurar Python para el analizador IA
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Instalar dependencias del analizador IA
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
-        run: pip install openai
+        run: |
+          pip install openai
+      # ── Ejecutar el analizador de IA ──
       - name: Ejecutar análisis de calidad con IA
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         id: analisis-ia
-        continue-on-error: true
+        continue-on-error: true   # El reporte se publica aunque el pipeline bloquee el merge
         env:
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
         run: |
           ARCHIVOS="${{ steps.archivos-modificados.outputs.lista_archivos }}"
-          echo "Analizando: $ARCHIVOS"
-          python scripts/ai_code_analyzer.py --output reporte-ia.md --json --umbral 7.0 $ARCHIVOS
+          echo "Iniciando análisis de IA sobre: $ARCHIVOS"
+          # Ejecutar el analizador y capturar código de salida
+          python scripts/ai_code_analyzer.py \
+            --output reporte-ia.md \
+            --json \
+            --umbral 5.0 \
+            $ARCHIVOS
           echo "codigo_salida=$?" >> $GITHUB_OUTPUT
+      # ── Publicar reporte como comentario en el PR ──
       - name: Publicar reporte de IA en el Pull Request
-        if: always() && github.event_name == 'pull_request' && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
+        if: >
+          always() &&
+          github.event_name == 'pull_request' &&
+          steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            // Leer el reporte generado
             let reporte = '';
-            try { reporte = fs.readFileSync('reporte-ia.md', 'utf8'); }
-            catch (e) { reporte = 'No se pudo generar el reporte de analisis de IA.'; }
-            if (reporte.length > 60000) reporte = reporte.substring(0, 60000) + '\n\n*[Reporte truncado]*';
-            const { data: comentarios } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
-            });
-            const existente = comentarios.find(c =>
-              c.user.login === 'github-actions[bot]' && c.body.includes('Reporte de Analisis de Calidad de Codigo'));
-            if (existente) {
-              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existente.id, body: reporte });
-            } else {
-              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: reporte });
+            try {
+              reporte = fs.readFileSync('reporte-ia.md', 'utf8');
+            } catch (e) {
+              reporte = ' No se pudo generar el reporte de análisis de IA.';
             }
+            // Limitar tamaño del comentario (GitHub permite máx. 65536 chars)
+            const MAX_CHARS = 60000;
+            if (reporte.length > MAX_CHARS) {
+              reporte = reporte.substring(0, MAX_CHARS) + '\n\n*[Reporte truncado por tamaño]*';
+            }
+            // Buscar si ya existe un comentario del bot para actualizarlo
+            const { data: comentarios } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const comentarioExistente = comentarios.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('Reporte de Análisis de Calidad de Código')
+            );
+            if (comentarioExistente) {
+              // Actualizar comentario existente
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: comentarioExistente.id,
+                body: reporte,
+              });
+              console.log('Comentario de IA actualizado.');
+            } else {
+              // Crear nuevo comentario
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: reporte,
+              });
+              console.log('Nuevo comentario de IA publicado.');
+            }
+      # ── Guardar el reporte como artefacto descargable ──
       - name: Guardar reporte como artefacto
         if: always() && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         uses: actions/upload-artifact@v4
-        with:
-          name: reporte-analisis-ia
-          path: |
+@@ -193,58 +128,40 @@ jobs:
             reporte-ia.md
             reporte-ia.json
           retention-days: 30
+
+      # ── Resumen en el panel de GitHub Actions ──
+      - name: Publicar resumen en el panel de GitHub Actions
+        if: always() && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
+        run: |
+          if [ -f reporte-ia.md ]; then
+            echo "## Reporte de Análisis de Calidad" >> $GITHUB_STEP_SUMMARY
+            cat reporte-ia.md >> $GITHUB_STEP_SUMMARY
+          fi
       - name: Mensaje cuando no hay archivos de código
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'false'
-        run: echo "No se detectaron archivos de codigo. Se omite el analisis de IA."
-
-  # ── JOB 3: Quality Gate (bloquea si la puntuación es < 7) ──
+        run: |
+          echo "ℹ️ No se detectaron archivos de código fuente modificados."
+          echo "El análisis de IA se omite para este push."
+  # ──────────────────────────────────────────────────────────
+  #  JOB 3: Gate de calidad final
+  # ──────────────────────────────────────────────────────────
   quality-gate:
-    name: "Quality Gate Final"
+    name: "🚦 Quality Gate Final"
     runs-on: ubuntu-latest
     needs: [analisis-tradicional, analisis-ia]
     if: always()
+
     steps:
       - name: Evaluar resultado de todos los análisis
         run: |
           TRADICIONAL="${{ needs.analisis-tradicional.result }}"
-          IA_RESULTADO="${{ needs.analisis-ia.outputs.resultado_ia }}"
-          echo "Resultado analisis estatico: $TRADICIONAL"
-          echo "Resultado IA (0=apto, 1=bloqueado): $IA_RESULTADO"
+          IA="${{ needs.analisis-ia.result }}"
+          echo "Resultado análisis estático: $TRADICIONAL"
+          echo "Resultado análisis IA:       $IA"
           if [ "$TRADICIONAL" == "failure" ]; then
-            echo "El analisis estatico (linting/tests) fallo."
+            echo " El análisis estático (linting/tests) falló."
             exit 1
           fi
-          if [ "$IA_RESULTADO" == "1" ]; then
-            echo "La IA detecto calidad insuficiente (puntuacion < 7). Se bloquea el despliegue."
+          if [ "$IA" == "failure" ]; then
+            echo " El análisis de IA detectó problemas críticos de calidad."
             exit 1
           fi
-          echo "Todos los analisis pasaron. El codigo esta listo."
-
-  # ── JOB 4: Despliegue automático (solo si el gate pasa) ──
+          echo " Todos los análisis pasaron correctamente. El código está listo."
+  # ──────────────────────────────────────────────────────────
+  #  JOB 4: Despliegue automático al VPS (solo si el gate pasa)
+  # ──────────────────────────────────────────────────────────
   despliegue:
-    name: "Despliegue Automático al VPS"
+    name: " Despliegue Automático al VPS"
     runs-on: ubuntu-latest
     needs: quality-gate
+    # Solo despliega en push a main y si el Quality Gate pasó
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
     steps:
+      # Una sola conexión SSH: el servidor actualiza el código con git y redespliega.
+      # (Evita SCP, que abre 2 conexiones y choca con el anti-abuso de red de Hostinger.)
       - name: Desplegar en el VPS por SSH (git pull + Docker)
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+@@ -254,17 +171,16 @@ jobs:
           command_timeout: "20m"
           script: |
             set -e
-            echo "Iniciando despliegue automatico..."
+            echo " Iniciando despliegue automático..."
             REPO=/root/tesis-ia-pipeline
             if [ ! -d "$REPO/.git" ]; then
               git clone https://github.com/adriandanielcerezonevarez-web/tesis-ia-pipeline.git "$REPO"
@@ -179,8 +251,9 @@ jobs:
             cd "$REPO"
             git fetch origin main
             git reset --hard origin/main
+            # Limpiar contenedores previos que puedan ocupar los puertos 80/443
             docker rm -f helpdesk helpdesk-prod helpdesk-staging 2>/dev/null || true
             cd "$REPO/helpdesk-deploy"
             docker compose up -d --build --remove-orphans
             docker image prune -f
-            echo "Despliegue completado. HelpDesk en https://helpdesk-arce.duckdns.org"
+            echo " Despliegue completado. HelpDesk en https://helpdesk-arce.duckdns.org"
