@@ -1,5 +1,7 @@
 // claves de sesión y almacenamiento
 const SESSION_KEY = 'helpdesk_session';
+(() => {
+  // Encapsulate module to avoid polluting global scope
 const USERS_KEY = 'helpdesk_users';
 const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
@@ -36,14 +38,29 @@ function updateConnectionBadge(online) {
 }
 
 function initAuth() {
-  const s = sessionStorage.getItem(SESSION_KEY);
-  if (!s) {
+  const sessionData = sessionStorage.getItem(SESSION_KEY);
+  if (!sessionData) {
     if (!window.location.pathname.endsWith('login.html')) {
       window.location.href = 'login.html';
     }
     return false;
   }
-  session = JSON.parse(s);
+  try {
+    session = JSON.parse(sessionData);
+    // ---- VALIDACIÓN DE EXPIRACIÓN DE SESIÓN ----
+    // Se espera que el objeto de sesión contenga la propiedad `expires` (timestamp en ms)
+    if (session.expires && Date.now() > session.expires) {
+      console.warn('Sesión expirada, se elimina');
+      sessionStorage.removeItem(SESSION_KEY);
+      window.location.href = 'login.html';
+      return false;
+    }
+  } catch (e) {
+    console.error('Error parsing session data:', e);
+    sessionStorage.removeItem(SESSION_KEY);
+    window.location.href = 'login.html';
+    return false;
+  }
   document.body.classList.add(`role-${session.role}`);
 
   const nameEl = document.getElementById('userDisplayName');
@@ -62,17 +79,33 @@ function initAuth() {
 function logout() {
   if (unsubscribeTickets) unsubscribeTickets();
   try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (_) {}
+  // Eliminar sesión y cualquier dato sensible
   sessionStorage.removeItem(SESSION_KEY);
+  // Opcional: limpiar datos en memoria
+  session = null;
+  tickets = [];
+  users = [];
   window.location.href = 'login.html';
 }
 
 // fallback localStorage
 function dbLoad() {
-  try { return JSON.parse(localStorage.getItem(DB_KEY)) || []; }
-  catch { return []; }
+  const raw = localStorage.getItem(DB_KEY);
+  if (!raw) return [];
+  try { return JSON.parse(raw) || []; }
+  catch (e) {
+    console.error('Error parsing tickets from localStorage:', e);
+    return [];
+  }
 }
 function dbSave(ticketsArr) {
-  localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
+  try {
+    localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
+  } catch (e) {
+    // Manejo de errores de cuota o escritura
+    console.error('Error al guardar tickets en localStorage:', e);
+    showToast('No se pudo guardar la información localmente (posible cuota excedida)', 'error');
+  }
 }
 function dbNextId() {
   const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
@@ -81,8 +114,13 @@ function dbNextId() {
   return `TK-${String(next).padStart(4, '0')}`;
 }
 function usersLoad() {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY)) || []; }
-  catch { return []; }
+  const raw = localStorage.getItem(USERS_KEY);
+  if (!raw) return [];
+  try { return JSON.parse(raw) || []; }
+  catch (e) {
+    console.error('Error parsing users from localStorage:', e);
+    return [];
+  }
 }
 function usersSave(usersArr) {
   localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
@@ -472,14 +510,14 @@ function clearFilters() {
 // modal de detalle
 function openTicketModal(id) {
   const t = tickets.find(x => x.id === id);
-  if (!t) return;
+  if (!t) { showToast('Ticket no encontrado', 'error'); return; }
   // un usuario sólo puede ver sus propios tickets
   if (session.role === 'user' && t.requesterId !== session.userId) {
     showToast('No tienes permiso para ver este ticket', 'error'); return;
   }
 
   trySet('modalId', t.id);
-  trySet('modalTitle', t.title);
+  trySet('modalTitle', t.title || 'Sin título');
 
   document.getElementById('modalBadges').innerHTML = `
     ${statusBadgeHtml(t.status)} ${priorityBadgeHtml(t.priority)}
@@ -589,6 +627,16 @@ async function saveTicket(e) {
   const category = document.getElementById('ticketCategory').value;
   const priority = document.getElementById('ticketPriority').value;
   const description = document.getElementById('ticketDescription').value.trim();
+
+  // ---- VALIDACIÓN BÁSICA DE ENTRADA ----
+  if (!title) {
+    showToast('El título es obligatorio', 'error');
+    return;
+  }
+  if (!description) {
+    showToast('La descripción es obligatoria', 'error');
+    return;
+  }
 
   let status = document.getElementById('ticketStatus')?.value || 'Abierto';
   let assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
@@ -745,13 +793,6 @@ function exportJSON() {
   const data = JSON.stringify({ tickets, users }, null, 2);
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
-function exportCSV() {
-  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
-}
 
 
 async function clearAllData() {
@@ -766,7 +807,9 @@ async function clearAllData() {
       await batch.commit();
       showToast('Base de datos depurada', 'info');
     } catch (err) {
-      showToast('Error al limpiar: ' + err.message, 'error');
+      // Manejo específico de errores de cuota o red
+      console.error('Error al limpiar la base de datos Firebase:', err);
+      showToast('Error al limpiar la base de datos: ' + err.message, 'error');
     }
   } else {
     tickets = [];
@@ -956,3 +999,4 @@ function formatDateFull(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+})();
