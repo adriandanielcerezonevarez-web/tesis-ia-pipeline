@@ -1,0 +1,100 @@
+# ============================================================
+#  REPORTES DE CALIDAD IA (DIARIO / SEMANAL / MENSUAL)
+#  Junta los reportes generados por la IA en el periodo elegido
+#  y los deja en un unico ZIP descargable desde Actions.
+#  Tesis: Diseno de un modelo de uso de IA en pipelines CI/CD
+#  Autores: Arce Noboa Allison - Cerezo Nevarez Adrian
+# ============================================================
+name: "Reportes de Calidad IA (Diario/Semanal/Mensual)"
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # DIARIO  - todos los dias 12:00 UTC (07:00 Ecuador)
+    - cron: "0 12 * * 1"   # SEMANAL - cada lunes 12:00 UTC
+    - cron: "0 12 1 * *"   # MENSUAL - el dia 1 de cada mes 12:00 UTC
+  # Boton "Run workflow": permite elegir el periodo a mano
+  workflow_dispatch:
+    inputs:
+      periodo:
+        description: "Periodo del reporte a descargar"
+        type: choice
+        default: semanal
+        options:
+          - diario
+          - semanal
+          - mensual
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  empaquetar-reportes:
+    name: "Empaquetar reportes de IA"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Determinar el periodo y el rango de dias
+        id: periodo
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PERIODO="${{ github.event.inputs.periodo }}"
+          else
+            case "${{ github.event.schedule }}" in
+              "0 12 * * *") PERIODO="diario" ;;
+              "0 12 * * 1") PERIODO="semanal" ;;
+              "0 12 1 * *") PERIODO="mensual" ;;
+              *)            PERIODO="semanal" ;;
+            esac
+          fi
+          case "$PERIODO" in
+            diario)  DIAS=1  ;;
+            semanal) DIAS=7  ;;
+            mensual) DIAS=30 ;;
+            *)       DIAS=7  ;;
+          esac
+          echo "periodo=$PERIODO" >> "$GITHUB_OUTPUT"
+          echo "dias=$DIAS" >> "$GITHUB_OUTPUT"
+          echo "Periodo seleccionado: $PERIODO ($DIAS dias)"
+
+      - name: Descargar los reportes de IA del periodo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIAS: ${{ steps.periodo.outputs.dias }}
+        run: |
+          set -e
+          mkdir -p reportes
+          DESDE=$(date -u -d "$DIAS days ago" +%Y-%m-%dT%H:%M:%SZ)
+          echo "Buscando artefactos de reportes desde: $DESDE"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.name==\"reporte-analisis-ia\") | select(.created_at >= \"$DESDE\") | .id" \
+            > ids.txt || true
+          if [ ! -s ids.txt ]; then
+            echo "No hubo reportes de IA en el periodo."
+            echo "No se generaron reportes de IA entre $DESDE y hoy." > reportes/SIN-REPORTES.txt
+          else
+            CONT=0
+            while read -r ID; do
+              [ -z "$ID" ] && continue
+              CONT=$((CONT+1))
+              echo "Descargando artefacto de reporte #$ID"
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ID/zip" \
+                > "reportes/reporte-$ID.zip" || true
+            done < ids.txt
+            echo "Se descargaron $CONT reportes."
+          fi
+
+      - name: Comprimir todo en un unico ZIP
+        run: |
+          cd reportes
+          zip -r ../reportes-ia-${{ steps.periodo.outputs.periodo }}.zip . || true
+
+      - name: Publicar el paquete descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-ia-${{ steps.periodo.outputs.periodo }}-${{ github.run_id }}
+          path: reportes-ia-${{ steps.periodo.outputs.periodo }}.zip
+          retention-days: 90
