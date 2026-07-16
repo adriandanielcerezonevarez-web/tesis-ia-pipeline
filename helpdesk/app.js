@@ -746,6 +746,45 @@ function exportJSON() {
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
 
+// Campos exportables para CSV
+const CSV_HEADERS = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
+const CSV_FIELDS = ['id', 'title', 'category', 'priority', 'status', 'assigned', 'requester', 'createdAt'];
+
+/**
+ * Escapa y sanitiza un valor para CSV.
+ * Previene CSV Injection añadiendo una comilla simple a valores que empiecen con =,+,-,@
+ * y elimina saltos de línea.
+ */
+function sanitizeCsvValue(value) {
+  let v = String(value).replace(/[\r\n]+/g, ' ');
+  if (/^[=+\-@]/.test(v)) v = "'" + v;
+  return `"${v.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Genera el contenido CSV a partir de un arreglo de tickets.
+ * @param {Array} dataArray - Arreglo de tickets.
+ * @returns {string} CSV listo para descargar.
+ * @throws {Error} Si dataArray no es un arreglo.
+ */
+function generateCsvContent(dataArray) {
+  if (!Array.isArray(dataArray)) throw new Error('tickets must be an array');
+  const rows = dataArray.map(t => CSV_FIELDS.map(f => {
+    const val = f === 'createdAt' ? formatDateFull(t[f]) : (t[f] ?? '');
+    return sanitizeCsvValue(val);
+  }).join(','));
+  return [CSV_HEADERS.join(','), ...rows].join('\r\n');
+}
+//exporta csv
+function exportCSV() {
+  try {
+    const csv = generateCsvContent(tickets);
+    downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  } catch (err) {
+    console.error('exportCSV error:', err);
+    showToast('Error al exportar CSV: ' + err.message, 'error');
+  }
+}
 
 async function clearAllData() {
   if (!confirm('Vas a borrar TODOS los tickets. No hay vuelta atrás. ¿Seguro?')) return;
