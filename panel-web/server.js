@@ -20,6 +20,26 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// ─────────────────────────────────────────────────────────────
+//  CORS: solo se aceptan peticiones desde orígenes autorizados.
+//  Los orígenes se definen por variable de entorno (CORS_ORIGINS).
+// ─────────────────────────────────────────────────────────────
+const CORS_ORIGINS = (process.env.CORS_ORIGINS ||
+  "https://cerezoarce.duckdns.org,https://helpdesk-arce.duckdns.org,http://localhost:3000")
+  .split(",").map((o) => o.trim()).filter(Boolean);
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && CORS_ORIGINS.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  }
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
 const PORT = process.env.PORT || 3000;
 // Proveedor de IA (Cerebras por defecto; configurable por variables de entorno).
 const LLM_KEY = process.env.CEREBRAS_API_KEY || process.env.GROQ_API_KEY || "";
@@ -29,6 +49,22 @@ const UMBRAL = 7;                                    // nota mínima para desple
 const MAX_ITER = 4;                                  // correcciones máximas
 const HELPDESK_DIR = process.env.HELPDESK_DIR || "/helpdesk";  // carpeta del HelpDesk (volumen)
 const HELPDESK_URL = "https://helpdesk-arce.duckdns.org";
+
+// ─────────────────────────────────────────────────────────────
+//  Histórico de reportes: cada análisis se guarda con su fecha
+//  para poder descargar los reportes por periodo (diario/semanal/mensual).
+// ─────────────────────────────────────────────────────────────
+const REPORTES_DIR = process.env.REPORTES_DIR || path.join(HELPDESK_DIR, "reportes-ia");
+try { fs.mkdirSync(REPORTES_DIR, { recursive: true }); } catch (e) { /* ignorar */ }
+
+function guardarReporte(analisis, nombre) {
+  try {
+    const registro = { fecha: new Date().toISOString(), archivo: nombre || "codigo", analisis };
+    fs.appendFileSync(path.join(REPORTES_DIR, "historico.jsonl"), JSON.stringify(registro) + "\n", "utf-8");
+  } catch (e) {
+    console.error("No se pudo guardar el reporte:", e.message);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 //  Prompts con rúbrica fija (para puntuaciones consistentes)
@@ -77,21 +113,25 @@ Responde SOLO con JSON puro (sin markdown, sin texto extra):
 }`.trim();
 
 const PROMPT_CORRECCION = `
-Eres un ingeniero experto. Mejora la calidad del código de forma CONSERVADORA, sin romper nada.
+Eres un ingeniero experto en calidad de código. Recibes un archivo y recomendaciones de mejora.
+NO reescribas el archivo completo. Devuelve SOLO cambios puntuales (quirúrgicos) en bloques con
+este formato EXACTO:
 
-REGLAS OBLIGATORIAS (respétalas todas):
-1. Devuelve el archivo COMPLETO, sin recortar ni omitir nada. Prohibido usar "..." o resúmenes.
-2. NO reestructures el archivo. NO separes el CSS ni el JavaScript a archivos externos:
-   si están embebidos (dentro de <style> o <script>), DÉJALOS embebidos exactamente igual.
-3. NO cambies, agregues ni quites etiquetas <link>, <script src>, ni ninguna referencia a archivos
-   o recursos externos. Mantén las MISMAS rutas y los mismos recursos que ya tenía.
-4. NO agregues Content-Security-Policy ni meta etiquetas nuevas. NO inventes valores integrity/SRI.
-5. CONSERVA todos los estilos y la estructura visual EXACTAMENTE: el archivo debe verse y funcionar
-   IDÉNTICO al original. Debe funcionar POR SÍ SOLO, sin depender de archivos nuevos que no existían.
-6. Solo puedes: quitar credenciales/secretos embebidos, corregir vulnerabilidades de lógica (ej.
-   inyección), mejorar nombres de variables internas y agregar comentarios. NADA más.
+@@BUSCAR@@
+<fragmento EXACTO del código original, copiado carácter por carácter, con varias líneas de
+contexto para que sea único e inconfundible dentro del archivo>
+@@REEMPLAZAR@@
+<ese mismo fragmento, pero corregido>
+@@FIN@@
 
-Devuelve ÚNICAMENTE el código corregido completo, sin explicaciones y SIN delimitadores markdown.`.trim();
+REGLAS OBLIGATORIAS:
+- El texto entre @@BUSCAR@@ y @@REEMPLAZAR@@ debe existir EXACTAMENTE en el código (misma
+  indentación, mismas comillas, mismos espacios). Cópialo literal; si no coincide, se descarta.
+- Haz cambios MÍNIMOS: seguridad (credenciales, inyección), validación de datos y manejo de errores.
+- NO toques el diseño, los estilos, el HTML de presentación ni la estructura salvo que sea imprescindible.
+- NO inventes clases, NO separes el código a otros archivos, NO cambies referencias (<link>, <script src>).
+- Máximo 6 bloques, los más importantes. Si no hay cambios realmente seguros, no devuelvas ningún bloque.
+- No escribas nada fuera de los bloques.`.trim();
 
 // ─────────────────────────────────────────────────────────────
 //  Llamada a Groq
@@ -199,10 +239,26 @@ async function analizar(codigo, nombre) {
 
 async function corregir(codigo, nombre, recomendaciones) {
   const ext = (nombre || "").split(".").pop();
-  const maxT = Math.min(24000, Math.max(4000, Math.ceil(codigo.length / 2) + 3000));
-  const user = `Corrige este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
+  const maxT = Math.min(16000, Math.max(3000, Math.ceil(codigo.length / 4) + 3000));
+  const user = `Archivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones a aplicar:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
   const raw = await groq(PROMPT_CORRECCION, user, maxT, 0.1, { reasoning_effort: "low" });
-  return quitarCerca(raw).trim() + "\n";
+  return aplicarParches(codigo, raw);
+}
+
+// Aplica solo los bloques @@BUSCAR@@/@@REEMPLAZAR@@ que coinciden EXACTAMENTE con el código.
+// El resto del archivo queda intacto byte por byte; los bloques que no encajan se descartan.
+function aplicarParches(codigo, respuesta) {
+  const re = /@@BUSCAR@@\r?\n([\s\S]*?)\r?\n@@REEMPLAZAR@@\r?\n([\s\S]*?)\r?\n@@FIN@@/g;
+  let nuevo = codigo;
+  let m;
+  while ((m = re.exec(respuesta)) !== null) {
+    const buscar = m[1];
+    const reemplazar = m[2];
+    if (buscar && nuevo.includes(buscar)) {
+      nuevo = nuevo.replace(buscar, reemplazar);
+    }
+  }
+  return nuevo;
 }
 
 // Explica los cambios entre el código original y el corregido (qué, por qué, mejora).
@@ -244,6 +300,7 @@ app.post("/api/analizar", async (req, res) => {
     const { codigo, nombre } = req.body;
     if (!codigo || !codigo.trim()) throw new Error("No se recibió código.");
     const analisis = await analizar(codigo, nombre);
+    guardarReporte(analisis, nombre);
     res.json({ ok: true, analisis });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -274,6 +331,9 @@ app.post("/api/corregir", async (req, res) => {
       codigo = nuevo;
     }
 
+    // Guardar el reporte final de la corrección en el histórico.
+    if (analisis) guardarReporte(analisis, nombre);
+
     // Explicar qué cambió (solo si hubo cambios reales)
     let cambios = [];
     if (codigo.trim() !== original.trim()) {
@@ -285,36 +345,68 @@ app.post("/api/corregir", async (req, res) => {
       codigo_corregido: codigo,
       progresion,
       analisis,
-      apto: analisis.puntuacion_calidad >= UMBRAL,
       cambios,
+      apto: Boolean(analisis && analisis.puntuacion_calidad >= UMBRAL),
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-// Despliegue REAL al HelpDesk: escribe el archivo en la carpeta que sirve el HelpDesk.
+// ─────────────────────────────────────────────────────────────
+//  Despliegue: escribe el archivo aprobado en la carpeta del HelpDesk.
+//  Seguridad: solo se admite un nombre de archivo simple (sin rutas)
+//  para evitar escritura fuera del directorio de despliegue (path traversal).
+// ─────────────────────────────────────────────────────────────
 app.post("/api/desplegar", async (req, res) => {
   try {
-    const { nombre, codigo } = req.body;
-    if (!codigo || !codigo.trim()) throw new Error("No hay código para desplegar.");
-    // Nombre seguro (sin rutas relativas) para evitar escribir fuera de la carpeta
-    const archivo = path.basename(nombre || "index.html");
-    if (!fs.existsSync(HELPDESK_DIR)) throw new Error("La carpeta del HelpDesk no está montada en el servidor.");
-    fs.writeFileSync(path.join(HELPDESK_DIR, archivo), codigo, "utf-8");
+    const { codigo, nombre } = req.body;
+    if (!codigo || !codigo.trim()) throw new Error("No se recibió código para desplegar.");
+    if (!nombre) throw new Error("Falta el nombre del archivo.");
+
+    const base = path.basename(nombre);
+    if (base !== nombre || base.includes("..")) throw new Error("Nombre de archivo no válido.");
+
+    const destino = path.join(HELPDESK_DIR, base);
+    fs.writeFileSync(destino, codigo, "utf-8");
+
     res.json({
       ok: true,
-      mensaje: `Desplegado en el HelpDesk: se actualizó "${archivo}". Míralo en ${HELPDESK_URL}`,
+      mensaje: `Archivo ${base} desplegado en el HelpDesk (${HELPDESK_URL}).`,
+      url: HELPDESK_URL,
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+// ─────────────────────────────────────────────────────────────
+//  Descarga de reportes por periodo: diario (1d), semanal (7d), mensual (30d).
+//  Devuelve un CSV (Excel) con todos los análisis del periodo elegido.
+// ─────────────────────────────────────────────────────────────
+app.get("/api/reportes/:periodo", (req, res) => {
+  try {
+    const rangos = { diario: 1, semanal: 7, mensual: 30 };
+    const dias = rangos[req.params.periodo] || 7;
+    const ruta = path.join(REPORTES_DIR, "historico.jsonl");
+    if (!fs.existsSync(ruta)) return res.status(404).send("Aun no hay reportes generados.");
+    const desde = Date.now() - dias * 24 * 60 * 60 * 1000;
+    const registros = fs.readFileSync(ruta, "utf-8").trim().split("\n")
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter((r) => r && new Date(r.fecha).getTime() >= desde);
+    let csv = "Fecha,Archivo,Puntuacion,Nivel de riesgo,Apto para despliegue\n";
+    for (const r of registros) {
+      const a = r.analisis || {};
+      csv += `"${r.fecha}","${r.archivo}","${a.puntuacion_calidad ?? ""}","${a.nivel_riesgo ?? ""}","${a.apto_para_despliegue ? "Si" : "No"}"\n`;
+    }
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="reportes-ia-${req.params.periodo}.csv"`);
+    res.send("\uFEFF" + csv);
+  } catch (e) {
+    res.status(500).send("Error: " + e.message);
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`App de validación IA escuchando en el puerto ${PORT}`);
+  console.log(`ARCE-CEREZO VALIDADOR escuchando en el puerto ${PORT} (modelo: ${MODELO})`);
 });

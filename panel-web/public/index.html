@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Validador de Código</title>
+<title>ARCE-CEREZO VALIDADOR</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
@@ -88,10 +88,11 @@
 <aside class="sidebar">
   <div class="sidebar-header">
     <div class="logo-mark">IA</div>
-    <div class="logo-text">Validador Arce-Cerezo<small>Validación CI/CD</small></div>
+    <div class="logo-text">ARCE-CEREZO VALIDADOR<small>Validación CI/CD</small></div>
   </div>
   <nav>
     <button class="nav-item active" onclick="ver('analizar')">Analizar código</button>
+    <button class="nav-item" onclick="ver('reportes')">Reportes IA</button>
     <button class="nav-item" onclick="ver('acerca')">Acerca de</button>
   </nav>
   <div class="sidebar-footer">Modelo GPT-OSS 120B (open source)<br/>Arce-Cerezo · Tesis</div>
@@ -122,10 +123,24 @@
       <div id="resultado"></div>
     </div>
 
+    <!-- SECCIÓN REPORTES -->
+    <div id="sec-reportes" class="oculto">
+      <div class="card">
+        <h2>Descargar reportes de la IA</h2>
+        <p class="sub">Cada análisis que hace la IA se guarda con su fecha. Descarga el histórico por periodo en un archivo (CSV/Excel).</p>
+        <div class="row" style="flex-wrap:wrap;gap:10px">
+          <button class="btn btn-ghost" onclick="window.location='/api/reportes/diario'">Descargar reportes de hoy</button>
+          <button class="btn btn-ghost" onclick="window.location='/api/reportes/semanal'">Descargar reportes de la semana</button>
+          <button class="btn btn-ghost" onclick="window.location='/api/reportes/mensual'">Descargar reportes del mes</button>
+        </div>
+        <p class="sub" style="margin-top:12px">El archivo incluye fecha, nombre del archivo, puntuación, nivel de riesgo y si fue apto para despliegue.</p>
+      </div>
+    </div>
+
     <!-- SECCIÓN ACERCA -->
     <div id="sec-acerca" class="oculto">
       <div class="card">
-        <h2>Acerca de CodeGate IA</h2>
+        <h2>Acerca de ARCE-CEREZO VALIDADOR</h2>
         <p class="sub">Aplicación de validación y corrección de código con Inteligencia Artificial.</p>
         <p>El usuario sube su código y la app aplica un proceso CI/CD con IA: analiza la calidad en 7 dimensiones,
         entrega un reporte descargable en PDF, y según la puntuación permite desplegar automáticamente
@@ -145,11 +160,12 @@ let codigoActual = "";
 let nombreActual = "";
 
 function ver(sec) {
-  $("sec-analizar").classList.toggle("oculto", sec !== "analizar");
-  $("sec-acerca").classList.toggle("oculto", sec !== "acerca");
-  $("titulo").textContent = sec === "analizar" ? "Analizar código" : "Acerca de";
-  document.querySelectorAll(".nav-item").forEach((b, i) =>
-    b.classList.toggle("active", (sec === "analizar") === (i === 0)));
+  const titulos = { analizar: "Analizar código", reportes: "Reportes IA", acerca: "Acerca de" };
+  ["analizar", "reportes", "acerca"].forEach((s) =>
+    $("sec-" + s).classList.toggle("oculto", s !== sec));
+  $("titulo").textContent = titulos[sec] || "Analizar código";
+  document.querySelectorAll(".nav-item").forEach((b) =>
+    b.classList.toggle("active", b.getAttribute("onclick").includes("'" + sec + "'")));
 }
 
 // Subida de archivo
