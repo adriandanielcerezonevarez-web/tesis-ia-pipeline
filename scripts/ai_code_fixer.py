@@ -156,6 +156,48 @@ def aplicar_parches(codigo, respuesta):
     return nuevo
 
 
+def corregir_archivo_completo(cliente, codigo, nombre_archivo, extension, recomendaciones):
+    """
+    Fallback: cuando los parches quirúrgicos no coinciden, se pide al modelo el
+    ARCHIVO COMPLETO ya corregido. El validador de integridad del orquestador
+    comprueba después que no rompa el proyecto antes de aplicarlo.
+    """
+    sistema = (
+        "Eres un ingeniero experto en calidad de código. Corrige el archivo aplicando las "
+        "recomendaciones. Devuelve el ARCHIVO COMPLETO ya corregido, sin explicaciones ni "
+        "markdown. Mantén intacto el resto del código y su estructura; NO separes el código en "
+        "archivos nuevos, NO inventes clases y NO cambies las referencias (<script src>, <link>)."
+    )
+    usuario = (
+        f"Recomendaciones a aplicar:\n{recomendaciones}\n\n"
+        f"Archivo: {nombre_archivo}\n```{extension}\n{codigo}\n```\n\n"
+        "Devuelve el archivo completo corregido."
+    )
+    try:
+        r = cliente.chat.completions.create(
+            model=MODELO_IA,
+            messages=[
+                {"role": "system", "content": sistema},
+                {"role": "user", "content": usuario},
+            ],
+            temperature=TEMPERATURA,
+            max_tokens=MAX_TOKENS,
+            reasoning_effort="low",
+        )
+        salida = r.choices[0].message.content.strip()
+        if salida.startswith("```"):
+            lineas = salida.split("\n")
+            if lineas and lineas[0].startswith("```"):
+                lineas = lineas[1:]
+            if lineas and lineas[-1].strip() == "```":
+                lineas = lineas[:-1]
+            salida = "\n".join(lineas)
+        return salida.strip() if salida.strip() else codigo
+    except Exception as e:
+        print(f"  [WARN] Fallback de archivo completo falló: {e}")
+        return codigo
+
+
 def obtener_cambios(ruta: str) -> str:
     """
     Obtiene solo las líneas nuevas o modificadas del archivo respecto a la rama
@@ -227,8 +269,14 @@ Devuelve únicamente los cambios en el formato de parches @@BUSCAR@@/@@REEMPLAZA
             reasoning_effort="low",
         )
         contenido = respuesta.choices[0].message.content.strip()
-        # Aplicar solo los cambios puntuales (parches) que coincidan exactamente con el código.
-        return aplicar_parches(codigo, contenido)
+        # Aplicar los parches quirúrgicos que coincidan con el código.
+        nuevo = aplicar_parches(codigo, contenido)
+        # Fallback: si los parches no cambiaron nada (no coincidieron), pedir el
+        # archivo COMPLETO corregido. El validador de integridad lo revisa antes de aplicarlo.
+        if nuevo.strip() == codigo.strip():
+            print("  Los parches no coincidieron; usando corrección de archivo completo (fallback).")
+            nuevo = corregir_archivo_completo(cliente, codigo, nombre_archivo, extension, bloque_recs)
+        return nuevo
 
     except Exception as e:
         print(f"  [ERROR] Falló la corrección de {nombre_archivo}: {e}")
