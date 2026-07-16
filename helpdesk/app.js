@@ -744,7 +744,71 @@ function exportJSON() {
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
 
+// Lista de campos exportables (configurable)
+const CSV_FIELDS = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
 
+/**
+ * Formatea una fila de datos para CSV, escapando comillas.
+ * @param {Array} row - Valores de la fila.
+ * @returns {string} Fila CSV escapada.
+ */
+function formatRow(row) {
+  return row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+}
+
+/**
+ * Construye el contenido CSV a partir de los encabezados y los tickets.
+ * @param {Array<string>} headers - Encabezados del CSV.
+ * @param {Array<Object>} data - Arreglo de tickets.
+ * @returns {string} CSV completo.
+ */
+function buildCSV(headers, data) {
+  const headerLine = headers.join(',');
+  const rows = data.map(t => formatRow([
+    t.id,
+    t.title,
+    t.category,
+    t.priority,
+    t.status,
+    t.assigned || '',
+    t.requester || '',
+    formatDateFull(t.createdAt)
+  ]));
+  return [headerLine, ...rows].join('\r\n');
+}
+
+/**
+ * Descarga un archivo usando la función externa `downloadFile`.
+ * @param {string} filename - Nombre del archivo.
+ * @param {string} content - Contenido del archivo.
+ * @param {string} mime - Tipo MIME.
+ */
+function triggerDownload(filename, content, mime) {
+  if (typeof downloadFile !== 'function') {
+    throw new Error('downloadFile no está disponible.');
+  }
+  downloadFile(filename, content, mime);
+}
+
+//exporta archivos a formato excel
+/**
+ * Exporta los tickets a CSV.
+ * @throws {Error} Si `tickets` no es un arreglo o ocurre un error al generar o descargar el archivo.
+ */
+function exportCSV() {
+  try {
+    // Validar que tickets sea un arreglo
+    if (!Array.isArray(tickets)) {
+      throw new Error('Los datos de tickets no están en el formato esperado.');
+    }
+
+    const csv = buildCSV(CSV_FIELDS, tickets);
+    triggerDownload('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  } catch (err) {
+    console.error('exportCSV error:', err);
+    showToast('Error al exportar CSV: ' + err.message, 'error');
+  }
+}
 
 async function clearAllData() {
   if (!confirm('Vas a borrar TODOS los tickets. No hay vuelta atrás. ¿Seguro?')) return;
