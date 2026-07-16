@@ -26,7 +26,7 @@ jobs:
   #  /fix-ia : la IA corrige iterativamente hasta alcanzar 8/10
   # ──────────────────────────────────────────────────────────
   fix-ia:
-    name: " 🤖 Corrección Automática con IA"
+    name: "🤖 Corrección Automática con IA"
     runs-on: ubuntu-latest
     if: >
       github.event.issue.pull_request &&
@@ -174,7 +174,7 @@ jobs:
   #  /fix-manual : el desarrollador corrige el código a mano
   # ──────────────────────────────────────────────────────────
   fix-manual:
-    name: " 📝Corrección Manual"
+    name: "📝 Corrección Manual"
     runs-on: ubuntu-latest
     if: >
       github.event.issue.pull_request &&
