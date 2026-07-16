@@ -553,9 +553,7 @@ function resetForm() {
   trySet('pageSubtitle', 'Crear un nuevo ticket de soporte');
 }
 
-function editTicket(id) {
-  const t = tickets.find(x => x.id === id);
-  if (!t) return;
+
 
   if (session.role === 'user' && t.requesterId !== session.userId) {
     showToast('Acceso denegado', 'error'); return;
