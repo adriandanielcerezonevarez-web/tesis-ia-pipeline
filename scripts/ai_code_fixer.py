@@ -112,47 +112,47 @@ def cargar_recomendaciones(ruta_reporte: str) -> dict:
     return recomendaciones_por_archivo
 
 
-def _reemplazo_tolerante(texto, buscar, reemplazar):
-    """
-    Reemplaza un bloque comparando línea por línea SIN tener en cuenta la
-    indentación (espacios al inicio/fin). Sirve cuando el modelo copia el
-    fragmento con espacios ligeramente distintos y el match exacto falla.
-    """
-    lineas = texto.split("\n")
-    objetivo = [l.strip() for l in buscar.split("\n")]
-    n = len(objetivo)
-    if n == 0:
-        return texto, False
-    for i in range(len(lineas) - n + 1):
-        if [l.strip() for l in lineas[i:i + n]] == objetivo:
-            reemplazo_lineas = reemplazar.split("\n") if reemplazar != "" else [""]
-            lineas[i:i + n] = reemplazo_lineas
-            return "\n".join(lineas), True
-    return texto, False
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def aplicar_parches(codigo, respuesta):
     """
-    Aplica los bloques @@BUSCAR@@/@@REEMPLAZAR@@. Primero intenta una coincidencia
-    EXACTA; si falla, usa una coincidencia tolerante a la indentación. Permite
-    también eliminar líneas (reemplazo vacío). El resto del archivo queda intacto.
+    Aplica solo los bloques @@BUSCAR@@/@@REEMPLAZAR@@ que coinciden EXACTAMENTE con el código.
+    El resto del archivo queda intacto; los bloques que no encajan se descartan.
+
     """
-    patron = re.compile(r"@@BUSCAR@@\r?\n(.*?)\r?\n@@REEMPLAZAR@@\r?\n?(.*?)@@FIN@@", re.DOTALL)
+    patron = re.compile(r"@@BUSCAR@@\r?\n(.*?)\r?\n@@REEMPLAZAR@@\r?\n(.*?)\r?\n@@FIN@@", re.DOTALL)
     nuevo = codigo
-    aplicados = 0
+
     for buscar, reemplazar in patron.findall(respuesta):
-        reemplazar = reemplazar.rstrip("\n")
-        if not buscar.strip():
-            continue
-        if buscar in nuevo:
+        if buscar and buscar in nuevo:
+
+
+
             nuevo = nuevo.replace(buscar, reemplazar, 1)
-            aplicados += 1
-        else:
-            nuevo, ok = _reemplazo_tolerante(nuevo, buscar, reemplazar)
-            if ok:
-                aplicados += 1
-    total = respuesta.count("@@BUSCAR@@")
-    print(f"  Parches: el modelo devolvió {total}, se aplicaron {aplicados}.")
+
+
+
+
+
+
+
     return nuevo
 
 
