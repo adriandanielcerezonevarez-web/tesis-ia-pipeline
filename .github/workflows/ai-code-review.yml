@@ -1,3 +1,4 @@
+
 # ============================================================
 #  AI CODE REVIEW — GitHub Actions Workflow
 # ============================================================
@@ -45,13 +46,11 @@ jobs:
         run: |
           pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
       - name: Ejecutar linter (flake8)
         run: |
           pip install flake8
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
-
       - name: Ejecutar pruebas unitarias
         run: |
           if [ -d tests ]; then
@@ -60,7 +59,6 @@ jobs:
           else
             echo "No se encontró directorio de tests. Omitiendo pruebas unitarias."
           fi
-
   # ──────────────────────────────────────────────────────────
   #  JOB 2: Análisis de calidad con IA (depende del Job 1)
   # ──────────────────────────────────────────────────────────
@@ -81,7 +79,6 @@ jobs:
         id: archivos-modificados
         run: |
           echo "Detectando archivos modificados en este push/PR..."
-
           # Para Pull Requests: comparar rama base vs rama actual
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
@@ -91,11 +88,9 @@ jobs:
             # Para push: comparar con el commit anterior
             ARCHIVOS=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git ls-files)
           fi
-
           # Filtrar solo archivos de código fuente soportados
           EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs"
           ARCHIVOS_CODIGO=$(echo "$ARCHIVOS" | grep -E "\.(${EXTENSIONES})$" | head -20 || true)
-
           if [ -z "$ARCHIVOS_CODIGO" ]; then
             echo "No se encontraron archivos de código modificados."
             echo "archivos_encontrados=false" >> $GITHUB_OUTPUT
@@ -108,7 +103,6 @@ jobs:
             echo "archivos_encontrados=true" >> $GITHUB_OUTPUT
             echo "lista_archivos=$LISTA" >> $GITHUB_OUTPUT
           fi
-
       # ── Configurar Python y dependencias del analizador ──
       - name: Configurar Python para el analizador IA
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
@@ -120,7 +114,6 @@ jobs:
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         run: |
           pip install openai
-
       # ── Ejecutar el analizador de IA ──
       - name: Ejecutar análisis de calidad con IA
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'true'
@@ -131,16 +124,13 @@ jobs:
         run: |
           ARCHIVOS="${{ steps.archivos-modificados.outputs.lista_archivos }}"
           echo "Iniciando análisis de IA sobre: $ARCHIVOS"
-
           # Ejecutar el analizador y capturar código de salida
           python scripts/ai_code_analyzer.py \
             --output reporte-ia.md \
             --json \
             --umbral 5.0 \
             $ARCHIVOS
-
           echo "codigo_salida=$?" >> $GITHUB_OUTPUT
-
       # ── Publicar reporte como comentario en el PR ──
       - name: Publicar reporte de IA en el Pull Request
         if: >
@@ -152,7 +142,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-
             // Leer el reporte generado
             let reporte = '';
             try {
@@ -160,25 +149,21 @@ jobs:
             } catch (e) {
               reporte = ' No se pudo generar el reporte de análisis de IA.';
             }
-
             // Limitar tamaño del comentario (GitHub permite máx. 65536 chars)
             const MAX_CHARS = 60000;
             if (reporte.length > MAX_CHARS) {
               reporte = reporte.substring(0, MAX_CHARS) + '\n\n*[Reporte truncado por tamaño]*';
             }
-
             // Buscar si ya existe un comentario del bot para actualizarlo
             const { data: comentarios } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-
             const comentarioExistente = comentarios.find(c =>
               c.user.login === 'github-actions[bot]' &&
               c.body.includes('Reporte de Análisis de Calidad de Código')
             );
-
             if (comentarioExistente) {
               // Actualizar comentario existente
               await github.rest.issues.updateComment({
@@ -198,7 +183,6 @@ jobs:
               });
               console.log('Nuevo comentario de IA publicado.');
             }
-
       # ── Guardar el reporte como artefacto descargable ──
       - name: Guardar reporte como artefacto
         if: always() && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
@@ -218,13 +202,11 @@ jobs:
             echo "## Reporte de Análisis de Calidad" >> $GITHUB_STEP_SUMMARY
             cat reporte-ia.md >> $GITHUB_STEP_SUMMARY
           fi
-
       - name: Mensaje cuando no hay archivos de código
         if: steps.archivos-modificados.outputs.archivos_encontrados == 'false'
         run: |
           echo "ℹ️ No se detectaron archivos de código fuente modificados."
           echo "El análisis de IA se omite para este push."
-
   # ──────────────────────────────────────────────────────────
   #  JOB 3: Gate de calidad final
   # ──────────────────────────────────────────────────────────
@@ -239,22 +221,17 @@ jobs:
         run: |
           TRADICIONAL="${{ needs.analisis-tradicional.result }}"
           IA="${{ needs.analisis-ia.result }}"
-
           echo "Resultado análisis estático: $TRADICIONAL"
           echo "Resultado análisis IA:       $IA"
-
           if [ "$TRADICIONAL" == "failure" ]; then
             echo " El análisis estático (linting/tests) falló."
             exit 1
           fi
-
           if [ "$IA" == "failure" ]; then
             echo " El análisis de IA detectó problemas críticos de calidad."
             exit 1
           fi
-
           echo " Todos los análisis pasaron correctamente. El código está listo."
-
   # ──────────────────────────────────────────────────────────
   #  JOB 4: Despliegue automático al VPS (solo si el gate pasa)
   # ──────────────────────────────────────────────────────────
