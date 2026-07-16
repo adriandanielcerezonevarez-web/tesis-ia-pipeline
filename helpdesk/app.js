@@ -4,7 +4,7 @@ const USERS_KEY = 'helpdesk_users';
 const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
 
-let session = null;
+const state = { session: null };
 
 // firebase (puede acabar null si no hay config)
 let db = null;
@@ -43,18 +43,19 @@ function initAuth() {
     }
     return false;
   }
-  session = JSON.parse(s);
-  document.body.classList.add(`role-${session.role}`);
+  state.session = JSON.parse(s);
+  // usar siempre state.session
+  document.body.classList.add(`role-${state.session.role}`);
 
   const nameEl = document.getElementById('userDisplayName');
   const roleEl = document.getElementById('userDisplayRole');
   const avatarEl = document.getElementById('userAvatar');
   const badgeEl = document.getElementById('topbarRoleBadge');
 
-  if (nameEl) nameEl.textContent = session.name;
-  if (roleEl) roleEl.textContent = session.role === 'admin' ? 'Administrador' : 'Usuario';
-  if (avatarEl) avatarEl.textContent = session.name.charAt(0).toUpperCase();
-  if (badgeEl) badgeEl.innerHTML = session.role === 'admin' ? 'Admin' : 'Usuario';
+  if (nameEl) nameEl.textContent = state.session.name;
+  if (roleEl) roleEl.textContent = state.session.role === 'admin' ? 'Administrador' : 'Usuario';
+  if (avatarEl) avatarEl.textContent = state.session.name.charAt(0).toUpperCase();
+  if (badgeEl) badgeEl.innerHTML = state.session.role === 'admin' ? 'Admin' : 'Usuario';
 
   return true;
 }
@@ -237,7 +238,7 @@ const SECTION_META = {
 
 function showSection(name) {
   // los usuarios normales no entran a las pantallas de admin
-  if (session.role === 'user' && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
+  if (state.session.role === 'user' && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
 
   currentSection = name;
 
@@ -277,7 +278,7 @@ function setupCharCounter() {
 
 // pinta todo en función del rol
 function renderAll() {
-  if (session.role === 'admin') {
+  if (state.session.role === 'admin') {
     renderDashboard();
     renderTicketsList();
     renderReports();
@@ -290,12 +291,12 @@ function renderAll() {
 }
 
 function updateNavBadge() {
-  if (session.role === 'admin') {
+  if (state.session.role === 'admin') {
     const open = tickets.filter(t => t.status === 'Abierto').length;
     const b = document.getElementById('nav-badge');
     if (b) b.textContent = open;
   } else {
-    const open = tickets.filter(t => t.requesterId === session.userId && t.status !== 'Cerrado' && t.status !== 'Resuelto').length;
+    const open = tickets.filter(t => t.requesterId === state.session.userId && t.status !== 'Cerrado' && t.status !== 'Resuelto').length;
     const bu = document.getElementById('nav-badge-user');
     if (bu) bu.textContent = open;
   }
@@ -303,7 +304,7 @@ function updateNavBadge() {
 
 // dashboard (admin)
 function renderDashboard() {
-  if (session.role !== 'admin') return;
+  if (state.session.role !== 'admin') return;
   const total = tickets.length;
   const open = tickets.filter(t => t.status === 'Abierto').length;
   const progress = tickets.filter(t => t.status === 'En Progreso').length;
@@ -342,7 +343,7 @@ function renderDashboard() {
 
 // listado de tickets (admin)
 function renderTicketsList(filtered) {
-  if (session.role !== 'admin') return;
+  if (state.session.role !== 'admin') return;
   const list = filtered !== undefined ? filtered : applyFilters(tickets);
   const tbody = document.getElementById('ticketsTableBody');
   const empty = document.getElementById('emptyState');
@@ -378,8 +379,8 @@ function renderTicketsList(filtered) {
 
 // mis tickets (usuario)
 function renderMyTickets(filtered) {
-  if (session.role !== 'user') return;
-  const myTickets = tickets.filter(t => t.requesterId === session.userId);
+  if (state.session.role !== 'user') return;
+  const myTickets = tickets.filter(t => t.requesterId === state.session.userId);
 
   // métricas del usuario
   trySet('bannerName', `Hola, ${session.name.split(' ')[0]}`);
@@ -456,7 +457,7 @@ let _filterTimer = null;
 function filterTickets() {
   clearTimeout(_filterTimer);
   _filterTimer = setTimeout(() => {
-    if (session.role === 'admin') renderTicketsList();
+    if (state.session.role === 'admin') renderTicketsList();
     else renderMyTickets();
   }, 150);
 }
@@ -474,7 +475,7 @@ function openTicketModal(id) {
   const t = tickets.find(x => x.id === id);
   if (!t) return;
   // un usuario sólo puede ver sus propios tickets
-  if (session.role === 'user' && t.requesterId !== session.userId) {
+  if (state.session.role === 'user' && t.requesterId !== state.session.userId) {
     showToast('No tienes permiso para ver este ticket', 'error'); return;
   }
 
@@ -534,11 +535,11 @@ function resetForm() {
   if (document.getElementById('ticketStatus')) document.getElementById('ticketStatus').value = 'Abierto';
 
   // si es usuario, autorrellenamos solicitante y email y los bloqueamos
-  if (session.role === 'user') {
+  if (state.session.role === 'user') {
     const reqField = document.getElementById('ticketRequester');
     const mailField = document.getElementById('ticketEmail');
-    if (reqField) { reqField.value = session.name; reqField.readOnly = true; }
-    if (mailField) { mailField.value = session.email || ''; mailField.readOnly = true; }
+    if (reqField) { reqField.value = state.session.name; reqField.readOnly = true; }
+    if (mailField) { mailField.value = state.session.email || ''; mailField.readOnly = true; }
   }
 
   trySet('formTitle', 'Crear Nuevo Ticket');
@@ -590,12 +591,30 @@ async function saveTicket(e) {
   const priority = document.getElementById('ticketPriority').value;
   const description = document.getElementById('ticketDescription').value.trim();
 
+  // ---- VALIDACIÓN BÁSICA ----
+  if (!title) {
+    showToast('El título es obligatorio', 'error');
+    return;
+  }
+  if (!category) {
+    showToast('Debe seleccionar una categoría', 'error');
+    return;
+  }
+  if (!priority) {
+    showToast('Debe seleccionar una prioridad', 'error');
+    return;
+  }
+  if (description.length > 2000) {
+    showToast('La descripción supera el límite de 2000 caracteres', 'error');
+    return;
+  }
+
   let status = document.getElementById('ticketStatus')?.value || 'Abierto';
   let assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
-  let requester = document.getElementById('ticketRequester')?.value.trim() || session.name;
+  let requester = document.getElementById('ticketRequester')?.value.trim() || state.session.name;
   let email = document.getElementById('ticketEmail')?.value.trim() || '';
   let notes = document.getElementById('ticketNotes')?.value.trim() || '';
-  let requesterId = session.role === 'admin' ? null : session.userId;
+  let requesterId = state.session.role === 'admin' ? null : state.session.userId;
 
   if (useFirebase) {
     try {
@@ -676,7 +695,7 @@ function cerrarMenuAsignar() {
 
 async function asignarTecnicoA(id, tecnico) {
   cerrarMenuAsignar();
-  if (session.role !== 'admin') return;
+  if (state.session.role !== 'admin') return;
   if (useFirebase) {
     try {
       await db.collection('tickets').doc(id).update({ assigned: tecnico, updatedAt: new Date().toISOString() });
@@ -697,7 +716,7 @@ async function asignarTecnicoA(id, tecnico) {
 
 // borrado
 function confirmDelete(id) {
-  if (session.role !== 'admin') return;
+  if (state.session.role !== 'admin') return;
   pendingDeleteId = id;
   openModal('confirmModal');
 }
@@ -722,7 +741,7 @@ async function executeDelete() {
 
 // reportes
 function renderReports() {
-  if (session.role !== 'admin') return;
+  if (state.session.role !== 'admin') return;
   const total = tickets.length;
   const open = tickets.filter(t => t.status === 'Abierto').length;
   const progress = tickets.filter(t => t.status === 'En Progreso').length;
@@ -791,7 +810,7 @@ async function clearAllData() {
 
 // gestión de usuarios
 function renderUsersList() {
-  if (session.role !== 'admin') return;
+  if (state.session.role !== 'admin') return;
   const tbody = document.getElementById('usersTableBody');
   if (!tbody) return;
   tbody.innerHTML = users.map(u => `
