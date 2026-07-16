@@ -647,26 +647,34 @@ function cancelForm() {
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
 }
 /**
-* Calcula un resumen de los tickets agrupados por prioridad
-* y lo muestra como una notificación en pantalla.
-* @returns {{alta: number, media: number, baja: number}} Conteo por
-prioridad.
-*/
-function resumenPorPrioridad() {
- const conteo = { alta: 0, media: 0, baja: 0 };
- if (!Array.isArray(tickets)) {
- showToast('No hay tickets disponibles', 'info');
- return conteo;
- }
- for (const ticket of tickets) {
- const prioridad = (ticket.priority || '').toLowerCase();
- if (prioridad === 'alta') conteo.alta += 1;
- else if (prioridad === 'media') conteo.media += 1;
- else if (prioridad === 'baja') conteo.baja += 1;
- }
- showToast(`Alta: ${conteo.alta} · Media: ${conteo.media} · Baja:
-${conteo.baja}`, 'success');
- return conteo;
+ * Calcula un resumen de los tickets agrupados por prioridad
+ * y lo muestra como una notificación en pantalla.
+ * @param {Array<Object>} ticketsArray - Lista de tickets a procesar.
+ * @returns {{alta: number, media: number, baja: number}} Conteo por prioridad.
+ */
+function resumenPorPrioridad(ticketsArray = tickets) {
+  const conteo = getPrioritySummary(ticketsArray);
+  // UI: notificación al usuario (solo si existe el contenedor de toast)
+  if (document.getElementById('toastContainer')) {
+    showToast(`Alta: ${conteo.alta} · Media: ${conteo.media} · Baja: ${conteo.baja}`, 'success');
+  }
+  return conteo;
+}
+
+/**
+ * Pure function that calculates ticket counts per priority.
+ * Returns an object { alta: number, media: number, baja: number }.
+ */
+function getPrioritySummary(ticketsArray = tickets) {
+  const result = { alta: 0, media: 0, baja: 0 };
+  if (!Array.isArray(ticketsArray)) return result;
+  for (const ticket of ticketsArray) {
+    const prioridad = (ticket.priority || '').toLowerCase();
+    if (prioridad === 'alta') result.alta += 1;
+    else if (prioridad === 'media') result.media += 1;
+    else if (prioridad === 'baja') result.baja += 1;
+  }
+  return result;
 }
 
 
@@ -761,21 +769,65 @@ function renderReports() {
 }
 
 // exportar y limpiar
-function exportJSON() {
-  const data = JSON.stringify({ tickets, users }, null, 2);
-  downloadFile('helpdesk_backup.json', data, 'application/json');
+const CSV_HEADERS = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
+
+/**
+ * Transforma un ticket en una fila CSV sanitizada.
+ * Elimina saltos de línea y escapa comillas dobles.
+ * Filtra campos sensibles (ej. email) que no deben exportarse.
+ * @param {Object} ticket
+ * @returns {string} CSV row
+ */
+function mapTicketToRow(ticket) {
+  const safeValues = [
+    ticket.id,
+    ticket.title,
+    ticket.category,
+    ticket.priority,
+    ticket.status,
+    ticket.assigned || '',
+    ticket.requester || '',
+    formatDateFull(ticket.createdAt)
+  ].map(v => {
+    // Elimina saltos de línea y carriage returns
+    const str = String(v).replace(/[\r\n]+/g, ' ');
+    // Escapa comillas dobles para CSV
+    return `"${str.replace(/"/g, '""')}"`;
+  });
+  return safeValues.join(',');
 }
+/**
+ * Export tickets to CSV file.
+ * Handles errors and notifies the user if something fails.
+ */
 function exportCSV() {
-  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  exportTicketsCsv();
 }
 function downloadFile(fname, content, type) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = fname; a.click(); URL.revokeObjectURL(url);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fname;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Generates CSV content for tickets and triggers download.
+ * Wrapped in try/catch to avoid breaking the app if formatting fails.
+ */
+function exportTicketsCsv() {
+  try {
+    const rows = tickets.map(mapTicketToRow);
+    const csv = [CSV_HEADERS.join(','), ...rows].join('\r\n');
+    downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  } catch (err) {
+    console.error('exportTicketsCsv error:', err);
+    if (document.getElementById('toastContainer')) {
+      showToast('Error al generar CSV: ' + err.message, 'error');
+    }
+  }
 }
 async function clearAllData() {
   if (!confirm('Vas a borrar TODOS los tickets. No hay vuelta atrás. ¿Seguro?')) return;
