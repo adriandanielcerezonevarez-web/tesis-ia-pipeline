@@ -746,7 +746,14 @@ function exportJSON() {
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
 
-
+//exporta archivos a formato excel
+function exportCSV() {
+  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
+  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
+    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+}
 
 async function clearAllData() {
   if (!confirm('Vas a borrar TODOS los tickets. No hay vuelta atrás. ¿Seguro?')) return;
