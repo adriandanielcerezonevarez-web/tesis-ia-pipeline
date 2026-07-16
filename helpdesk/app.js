@@ -133,9 +133,6 @@ if (window.location.pathname.endsWith('login.html')) {
         users = await fbLoadUsers();
         updateConnectionBadge(true);
 
-        // Los usuarios y sus contraseñas los gestiona Firebase Authentication.
-        // Aquí solo se leen los perfiles (nombre y rol); nunca se guardan contraseñas.
-
         // suscripción a cambios en tickets
         unsubscribeTickets = db.collection('tickets')
           .orderBy('createdAt', 'desc')
@@ -160,7 +157,7 @@ if (window.location.pathname.endsWith('login.html')) {
         useFirebase = false;
         tickets = dbLoad();
         users = usersLoad();
-        seedDemoData();
+        await seedDemoData();
       }
     } else {
       updateConnectionBadge(false);
@@ -350,7 +347,9 @@ function renderTicketsList(filtered) {
 
   if (list.length === 0) {
     tbody.innerHTML = '';
-    empty.style.display = 'flex'; empty.style.flexDirection = 'column'; empty.style.alignItems = 'center';
+    empty.style.display = 'flex';
+    empty.style.flexDirection = 'column';
+    empty.style.alignItems = 'center';
   } else {
     empty.style.display = 'none';
     tbody.innerHTML = list.map(t => `
@@ -401,7 +400,9 @@ function renderMyTickets(filtered) {
 
   if (list.length === 0) {
     tbody.innerHTML = '';
-    empty.style.display = 'flex'; empty.style.flexDirection = 'column'; empty.style.alignItems = 'center';
+    empty.style.display = 'flex';
+    empty.style.flexDirection = 'column';
+    empty.style.alignItems = 'center';
   } else {
     empty.style.display = 'none';
     tbody.innerHTML = list.map(t => `
@@ -518,7 +519,6 @@ function openTicketModal(id) {
 
   if (delBtn) {
     delBtn.onclick = () => { closeTicketModal(); confirmDelete(id); };
-
   }
 
   openModal('ticketModal');
@@ -647,9 +647,6 @@ function cancelForm() {
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
 }
 
-
-
-
 // ── Asignación rápida de técnico (botón en cada ticket) ──
 const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'];
 
@@ -746,11 +743,85 @@ function exportJSON() {
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
 
+/**
+ * Formatea un valor para CSV escapando comillas, comas y saltos de línea.
+ *
+ * @param {*} value Valor a formatear.
+ * @returns {string} Valor escapado y envuelto entre comillas.
+ */
+function formatValue(value) {
+  // Sanitiza contra inyección CSV: si el valor comienza con =,+,-,@ o tab, prefija con una comilla simple.
+  const str = String(value ?? '');
+  const needsPrefix = /^[=+\-@]/.test(str);
+  const sanitized = (needsPrefix ? "'" + str : str)
+    .replace(/"/g, '""')          // escapa comillas dobles
+    .replace(/\r?\n/g, ' ');      // elimina saltos de línea
+  return `"${sanitized}"`;
 }
+
+/**
+ * Construye una fila CSV a partir de un ticket.
+ *
+ * @param {Object} ticket Objeto ticket.
+ * @returns {string} Fila CSV.
+ */
+function buildRow(ticket) {
+  return [
+    ticket.id,
+    ticket.title,
+    ticket.category,
+    ticket.priority,
+    ticket.status,
+    ticket.assigned || '',
+    ticket.requester || '',
+    formatDateFull(ticket.createdAt)
+  ].map(formatValue).join(',');
+}
+
+/**
+ * Genera el contenido CSV a partir de un array de tickets.
+ * Incluye un BOM (`\uFEFF`) para que Excel detecte la codificación UTF‑8.
+ *
+ * @param {Array<Object>} data Lista de tickets.
+ * @returns {string} CSV listo para descargar.
+ */
+function generateCSV(data) {
+  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
+  const rows = data.map(buildRow);
+  return '\uFEFF' + [headers.map(formatValue).join(','), ...rows].join('\r\n');
+}
+
+/**
+ * Descarga un archivo generado en memoria.
+ *
+ * @param {string} filename Nombre del archivo a descargar.
+ * @param {string} content Contenido del archivo.
+ */
+function triggerDownload(filename, content) {
+  downloadFile(filename, content, 'text/csv;charset=utf-8');
+}
+
+function exportCSV() {
+  try {
+    if (!Array.isArray(tickets)) {
+      throw new Error('Los tickets no están disponibles');
+    }
+    const csv = generateCSV(tickets);
+    triggerDownload('tickets.csv', csv);
+  } catch (err) {
+    console.error('exportCSV error:', err);
+    showToast('Error al exportar CSV: ' + err.message, 'error');
+  }
+}
+
 function downloadFile(fname, content, type) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = fname; a.click(); URL.revokeObjectURL(url);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fname;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 async function clearAllData() {
   if (!confirm('Vas a borrar TODOS los tickets. No hay vuelta atrás. ¿Seguro?')) return;
@@ -795,8 +866,12 @@ function renderUsersList() {
   `).join('');
 }
 function openUserModal() {
-  tryVal('userEditId', ''); tryVal('userUsername', ''); tryVal('userName', '');
-  tryVal('userEmailField', ''); tryVal('userPassword', ''); tryVal('userRole', 'user');
+  tryVal('userEditId', '');
+  tryVal('userUsername', '');
+  tryVal('userName', '');
+  tryVal('userEmailField', '');
+  tryVal('userPassword', '');
+  tryVal('userRole', 'user');
   trySet('userModalTitle', 'Nuevo Usuario');
   const hint = document.getElementById('pwdHint'); if (hint) hint.style.display = 'none';
   const req = document.getElementById('pwdReq'); if (req) req.style.display = 'inline';
@@ -834,12 +909,10 @@ async function saveUser(e) {
         const updateData = { username, name, email, role };
         if (password) updateData.password = password;
         await db.collection('users').doc(id).update(updateData);
-        // mantén el array en memoria sincronizado
         const idx = users.findIndex(x => x.id === id);
         if (idx !== -1) { users[idx] = { ...users[idx], ...updateData }; }
         showToast('Usuario actualizado', 'success');
       } else {
-        // que no haya otro con el mismo username
         const snap = await db.collection('users').where('username', '==', username.toLowerCase()).get();
         if (!snap.empty) { showToast('Nombre de usuario en uso', 'error'); return; }
         const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
@@ -926,7 +999,8 @@ function showToast(message, type = 'info') {
   t.innerHTML = `<span>${escHtml(message)}</span>`;
   container.appendChild(t);
   setTimeout(() => {
-    t.classList.add('hide'); t.addEventListener('animationend', () => t.remove());
+    t.classList.add('hide');
+    t.addEventListener('animationend', () => t.remove());
   }, 3200);
 }
 
