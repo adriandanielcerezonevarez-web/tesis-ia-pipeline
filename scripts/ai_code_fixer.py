@@ -35,7 +35,7 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 
 MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
 TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras y consistentes
-MAX_TOKENS = 12000                        # Amplio: gpt-oss razona y devuelve el archivo completo
+MAX_TOKENS = 15000                        # Amplio: gpt-oss razona y devuelve el archivo completo
 
 SYSTEM_PROMPT = """
 Eres un ingeniero experto en calidad de código. Recibes un archivo y recomendaciones de mejora.
