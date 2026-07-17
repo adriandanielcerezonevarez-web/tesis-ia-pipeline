@@ -1,7 +1,9 @@
 # ============================================================
 #  REPORTES DE CALIDAD IA (DIARIO / SEMANAL / MENSUAL)
 #  Junta los reportes generados por la IA en el periodo elegido
-#  y los deja en un unico ZIP descargable desde Actions.
+#  y arma UN SOLO ZIP plano. Cada reporte va identificado con
+#  dia y hora, como IMAGEN (.png) + markdown (.md). Si el reporte
+#  fue corregido por la IA, incluye su version "-corregido".
 #  Tesis: Diseno de un modelo de uso de IA en pipelines CI/CD
 #  Autores: Arce Noboa Allison - Cerezo Nevarez Adrian
 # ============================================================
@@ -12,7 +14,6 @@ on:
     - cron: "0 12 * * *"   # DIARIO  - todos los dias 12:00 UTC (07:00 Ecuador)
     - cron: "0 12 * * 1"   # SEMANAL - cada lunes 12:00 UTC
     - cron: "0 12 1 * *"   # MENSUAL - el dia 1 de cada mes 12:00 UTC
-  # Boton "Run workflow": permite elegir el periodo a mano
   workflow_dispatch:
     inputs:
       periodo:
@@ -35,6 +36,14 @@ jobs:
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias para la imagen del reporte
+        run: pip install matplotlib
 
       - name: Determinar el periodo y el rango de dias
         id: periodo
@@ -66,31 +75,37 @@ jobs:
           DIAS: ${{ steps.periodo.outputs.dias }}
         run: |
           set -e
-          mkdir -p reportes
+          mkdir -p staging
+          : > staging/manifest.txt
           DESDE=$(date -u -d "$DIAS days ago" +%Y-%m-%dT%H:%M:%SZ)
-          echo "Buscando artefactos de reportes desde: $DESDE"
+          echo "Buscando reportes desde: $DESDE"
+          # Artefactos de analisis y de correccion, creados dentro del periodo
           gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
-            --jq ".artifacts[] | select(.name==\"reporte-analisis-ia\") | select(.created_at >= \"$DESDE\") | .id" \
-            > ids.txt || true
-          if [ ! -s ids.txt ]; then
+            --jq ".artifacts[]
+                  | select(.name==\"reporte-analisis-ia\" or .name==\"reporte-analisis-ia-corregido\")
+                  | select(.created_at >= \"$DESDE\")
+                  | \"\(.id)|\(.created_at)|\(.name)\"" \
+            > lista.txt || true
+          if [ ! -s lista.txt ]; then
             echo "No hubo reportes de IA en el periodo."
-            echo "No se generaron reportes de IA entre $DESDE y hoy." > reportes/SIN-REPORTES.txt
           else
-            CONT=0
-            while read -r ID; do
+            while IFS='|' read -r ID CREATED NAME; do
               [ -z "$ID" ] && continue
-              CONT=$((CONT+1))
-              echo "Descargando artefacto de reporte #$ID"
-              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ID/zip" \
-                > "reportes/reporte-$ID.zip" || true
-            done < ids.txt
-            echo "Se descargaron $CONT reportes."
+              echo "Descargando artefacto #$ID ($NAME)"
+              mkdir -p "staging/$ID"
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$ID/zip" > "staging/$ID.zip" || true
+              unzip -o -q "staging/$ID.zip" -d "staging/$ID" || true
+              echo "$ID|$CREATED|$NAME" >> staging/manifest.txt
+            done < lista.txt
           fi
 
-      - name: Comprimir todo en un unico ZIP
+      - name: Armar el ZIP de reportes (imagen + markdown, por dia y hora)
         run: |
-          cd reportes
-          zip -r ../reportes-ia-${{ steps.periodo.outputs.periodo }}.zip . || true
+          python scripts/empaquetar_reportes.py \
+            --staging staging \
+            --manifest staging/manifest.txt \
+            --out "reportes-ia-${{ steps.periodo.outputs.periodo }}.zip" \
+            --periodo "${{ steps.periodo.outputs.periodo }}"
 
       - name: Publicar el paquete descargable
         uses: actions/upload-artifact@v4
