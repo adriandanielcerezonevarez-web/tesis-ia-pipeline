@@ -491,14 +491,12 @@ app.get("/api/reportes/:periodo", async (req, res) => {
     const head = ws.getRow(1);
     head.height = 22;
     head.eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF26B21" } };
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.font = { color: { argb: "FF000000" }, size: 11 };
       cell.alignment = { vertical: "middle", horizontal: "center" };
       cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
     });
 
-    const nivelArgb = { BAJO: "FF2EA043", MEDIO: "FFB8860B", ALTO: "FFE5534B", "CRÍTICO": "FFA5202A", "CRITICO": "FFA5202A" };
-    registros.forEach((r, i) => {
+    registros.forEach((r) => {
       const a = r.analisis || {};
       const clave = claveReporte(r);
       const fila = ws.addRow({
@@ -512,18 +510,13 @@ app.get("/api/reportes/:periodo", async (req, res) => {
       });
       fila.height = 18;
       fila.eachCell((cell) => {
+        cell.font = { color: { argb: "FF000000" } };
         cell.alignment = { vertical: "middle", horizontal: "center" };
-        cell.border = { top: { style: "hair" }, left: { style: "hair" }, bottom: { style: "hair" }, right: { style: "hair" } };
+        cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
       });
-      if (i % 2 === 1) {
-        fila.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F4F7" } }; });
-      }
-      const cN = fila.getCell("nivel");
-      const argb = nivelArgb[cN.value];
-      if (argb) cN.font = { bold: true, color: { argb } };
       const cR = fila.getCell("reporte");
       cR.value = { text: "Ver reporte", hyperlink: `${baseUrl}/api/reportes/ver/${clave}` };
-      cR.font = { color: { argb: "FF1F6FEB" }, underline: true, bold: true };
+      cR.font = { color: { argb: "FF000000" }, underline: true };
     });
 
     const buf = await wb.xlsx.writeBuffer();
