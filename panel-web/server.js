@@ -13,6 +13,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import ExcelJS from "exceljs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,6 +92,13 @@ function leerHistorico() {
   return fs.readFileSync(ruta, "utf-8").trim().split("\n")
     .map((l) => { try { return JSON.parse(l); } catch { return null; } })
     .filter(Boolean);
+}
+
+// Clave estable de un reporte (soporta registros antiguos sin uid).
+function claveReporte(reg) {
+  if (reg.uid) return reg.uid;
+  const t = new Date(reg.fecha).getTime();
+  return "t-" + (isNaN(t) ? "0" : t);
 }
 
 // Genera una vista HTML del reporte (se ve como el reporte de análisis).
@@ -450,13 +458,15 @@ app.post("/api/desplegar", async (req, res) => {
 });
 
 app.get("/api/reportes/ver/:uid", (req, res) => {
-  const reg = leerHistorico().find((r) => r.uid === req.params.uid);
+  const reg = leerHistorico().find((r) => claveReporte(r) === req.params.uid);
   if (!reg) return res.status(404).send("Reporte no encontrado.");
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(reporteHtml(reg));
 });
 
-app.get("/api/reportes/:periodo", (req, res) => {
+// Descarga de reportes por periodo como Excel (.xlsx) con tabla formal
+// y una columna "Ver reporte" que abre la vista online del reporte.
+app.get("/api/reportes/:periodo", async (req, res) => {
   try {
     const rangos = { diario: 1, semanal: 7, mensual: 30 };
     const dias = rangos[req.params.periodo] || 7;
@@ -464,23 +474,62 @@ app.get("/api/reportes/:periodo", (req, res) => {
     const registros = leerHistorico().filter((r) => r && new Date(r.fecha).getTime() >= desde);
     if (!registros.length) return res.status(404).send("Aun no hay reportes en este periodo.");
     const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const c = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
-    const filas = [
-      ["Fecha y hora", "Archivo", "Puntuacion", "Nivel de riesgo", "Apto", "Corregido por IA", "Reporte"].join(";"),
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "ARCE-CEREZO VALIDADOR";
+    const ws = wb.addWorksheet("Reportes IA", { views: [{ state: "frozen", ySplit: 1 }] });
+    ws.columns = [
+      { header: "Fecha y hora", key: "fecha", width: 22 },
+      { header: "Archivo", key: "archivo", width: 26 },
+      { header: "Puntuacion", key: "punt", width: 12 },
+      { header: "Nivel de riesgo", key: "nivel", width: 16 },
+      { header: "Apto", key: "apto", width: 10 },
+      { header: "Corregido por IA", key: "corr", width: 16 },
+      { header: "Reporte", key: "reporte", width: 16 },
     ];
-    for (const r of registros) {
+
+    const head = ws.getRow(1);
+    head.height = 22;
+    head.eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF26B21" } };
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+      cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
+    });
+
+    const nivelArgb = { BAJO: "FF2EA043", MEDIO: "FFB8860B", ALTO: "FFE5534B", "CRÍTICO": "FFA5202A", "CRITICO": "FFA5202A" };
+    registros.forEach((r, i) => {
       const a = r.analisis || {};
-      const url = `${baseUrl}/api/reportes/ver/${r.uid}`;
-      const enlace = `=HYPERLINK(${c(url)},${c("Ver reporte")})`;
-      filas.push([
-        c(r.id_hora || r.fecha), c(r.archivo), c(a.puntuacion_calidad ?? ""),
-        c(a.nivel_riesgo ?? ""), c(a.apto_para_despliegue ? "Si" : "No"),
-        c(r.corregido ? "Si" : "No"), enlace,
-      ].join(";"));
-    }
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="reportes-ia-${req.params.periodo}.csv"`);
-    res.send("\uFEFF" + filas.join("\r\n"));
+      const clave = claveReporte(r);
+      const fila = ws.addRow({
+        fecha: r.id_hora || r.fecha,
+        archivo: r.archivo,
+        punt: a.puntuacion_calidad ?? "",
+        nivel: String(a.nivel_riesgo || "").toUpperCase(),
+        apto: a.apto_para_despliegue ? "Si" : "No",
+        corr: r.corregido ? "Si" : "No",
+        reporte: "Ver reporte",
+      });
+      fila.height = 18;
+      fila.eachCell((cell) => {
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+        cell.border = { top: { style: "hair" }, left: { style: "hair" }, bottom: { style: "hair" }, right: { style: "hair" } };
+      });
+      if (i % 2 === 1) {
+        fila.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F4F7" } }; });
+      }
+      const cN = fila.getCell("nivel");
+      const argb = nivelArgb[cN.value];
+      if (argb) cN.font = { bold: true, color: { argb } };
+      const cR = fila.getCell("reporte");
+      cR.value = { text: "Ver reporte", hyperlink: `${baseUrl}/api/reportes/ver/${clave}` };
+      cR.font = { color: { argb: "FF1F6FEB" }, underline: true, bold: true };
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="reportes-ia-${req.params.periodo}.xlsx"`);
+    res.send(Buffer.from(buf));
   } catch (e) {
     res.status(500).send("Error: " + e.message);
   }
