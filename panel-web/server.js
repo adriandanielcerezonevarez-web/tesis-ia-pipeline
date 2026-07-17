@@ -51,19 +51,96 @@ const HELPDESK_DIR = process.env.HELPDESK_DIR || "/helpdesk";  // carpeta del He
 const HELPDESK_URL = "https://helpdesk-arce.duckdns.org";
 
 // ─────────────────────────────────────────────────────────────
-//  Histórico de reportes: cada análisis se guarda con su fecha
-//  para poder descargar los reportes por periodo (diario/semanal/mensual).
+//  Histórico de reportes: cada análisis se guarda con día y hora
+//  para poder descargar los reportes por periodo (diario/semanal/mensual)
+//  y para ofrecer una vista del reporte desde el CSV.
 // ─────────────────────────────────────────────────────────────
 const REPORTES_DIR = process.env.REPORTES_DIR || path.join(HELPDESK_DIR, "reportes-ia");
 try { fs.mkdirSync(REPORTES_DIR, { recursive: true }); } catch (e) { /* ignorar */ }
 
-function guardarReporte(analisis, nombre) {
+// Identificador legible con día y hora (hora de Ecuador, UTC-5).
+function idFechaHora(d) {
+  const local = new Date(d.getTime() - 5 * 60 * 60 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${local.getUTCFullYear()}-${p(local.getUTCMonth() + 1)}-${p(local.getUTCDate())}` +
+         `_${p(local.getUTCHours())}-${p(local.getUTCMinutes())}-${p(local.getUTCSeconds())}`;
+}
+
+// Guarda cada análisis en el histórico. Devuelve el uid del reporte.
+function guardarReporte(analisis, nombre, corregido = false) {
   try {
-    const registro = { fecha: new Date().toISOString(), archivo: nombre || "codigo", analisis };
+    const ahora = new Date();
+    const idHora = idFechaHora(ahora);
+    const uid = idHora + "-" + Math.random().toString(36).slice(2, 6) + (corregido ? "-corregido" : "");
+    const registro = {
+      uid, id_hora: idHora, corregido: Boolean(corregido),
+      fecha: ahora.toISOString(), archivo: nombre || "codigo", analisis,
+    };
     fs.appendFileSync(path.join(REPORTES_DIR, "historico.jsonl"), JSON.stringify(registro) + "\n", "utf-8");
+    return uid;
   } catch (e) {
     console.error("No se pudo guardar el reporte:", e.message);
+    return null;
   }
+}
+
+// Lee todos los registros del histórico.
+function leerHistorico() {
+  const ruta = path.join(REPORTES_DIR, "historico.jsonl");
+  if (!fs.existsSync(ruta)) return [];
+  return fs.readFileSync(ruta, "utf-8").trim().split("\n")
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+}
+
+// Genera una vista HTML del reporte (se ve como el reporte de análisis).
+function reporteHtml(reg) {
+  const a = reg.analisis || {};
+  const nivel = String(a.nivel_riesgo || "?").toUpperCase();
+  const nivelColor = { BAJO: "#2ea043", MEDIO: "#d29922", ALTO: "#e5534b", "CRÍTICO": "#a5202a", "CRITICO": "#a5202a" }[nivel] || "#9aa7b4";
+  const estadoColor = (e) => ({ BIEN: "#2ea043", MEJORABLE: "#d29922", PROBLEMA: "#e5534b", "CRÍTICO": "#a5202a", "CRITICO": "#a5202a" }[String(e || "").toUpperCase()] || "#9aa7b4");
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const recs = (a.recomendaciones_prioritarias || []).map((r) => `<li>${esc(r)}</li>`).join("");
+  const dims = (a.dimensiones || []).map((d) =>
+    `<tr><td>${esc(d.nombre)}</td><td style="text-align:center">${esc(d.puntuacion)}/10</td>` +
+    `<td><span class="pill" style="background:${estadoColor(d.estado)}">${esc(String(d.estado || "").toUpperCase())}</span></td></tr>`).join("");
+  const apto = a.apto_para_despliegue ? "Apto para despliegue" : "Requiere correcciones";
+  const aptoColor = a.apto_para_despliegue ? "#2ea043" : "#e5534b";
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reporte ${esc(reg.archivo)} - ${esc(reg.id_hora)}</title>
+<style>
+ body{background:#0f1419;color:#e6edf3;font-family:system-ui,Segoe UI,Roboto,sans-serif;margin:0;padding:24px}
+ .wrap{max-width:820px;margin:0 auto}
+ .card{background:#1a2029;border:1px solid #2d3742;border-radius:12px;padding:20px;margin-bottom:16px}
+ .head{border:1px solid #f26b21}
+ h1{font-size:20px;margin:0 0 6px} h2{font-size:15px;margin:0 0 12px}
+ .sub{color:#9aa7b4;font-size:13px;margin:2px 0}
+ table{width:100%;border-collapse:collapse;font-size:13px}
+ td,th{padding:8px 10px;border-bottom:1px solid #2d3742;text-align:left}
+ .pill{color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700}
+ .big{font-size:15px;font-weight:700;color:#f26b21}
+ ul{margin:6px 0 0 18px;color:#c8d2dc;font-size:13px}
+</style></head><body><div class="wrap">
+ <div class="card head">
+   <h1>Reporte de An&aacute;lisis de Calidad de C&oacute;digo</h1>
+   <div class="sub">Pipeline CI/CD &middot; Modelo GPT-OSS 120B (open source)</div>
+   <div class="sub">Archivo: <b>${esc(reg.archivo)}</b> &middot; Identificador: <b>${esc(reg.id_hora)}</b>${reg.corregido ? " &middot; <b>corregido por IA</b>" : ""}</div>
+ </div>
+ <div class="card">
+   <h2>Resumen ejecutivo</h2>
+   <div class="sub">${esc(a.resumen_general || "")}</div>
+   <table>
+     <tr><td>Puntuaci&oacute;n de calidad</td><td class="big">${esc(a.puntuacion_calidad)} / 10</td></tr>
+     <tr><td>Nivel de riesgo</td><td><span class="pill" style="background:${nivelColor}">${esc(nivel)}</span></td></tr>
+     <tr><td>Estado</td><td style="color:${aptoColor};font-weight:700">${apto}</td></tr>
+   </table>
+ </div>
+ ${recs ? `<div class="card"><h2>Recomendaciones prioritarias</h2><ul>${recs}</ul></div>` : ""}
+ ${dims ? `<div class="card"><h2>An&aacute;lisis por dimensi&oacute;n</h2><table>` +
+   `<tr><th>Dimensi&oacute;n</th><th style="text-align:center">Puntuaci&oacute;n</th><th>Estado</th></tr>${dims}</table></div>` : ""}
+ <div class="sub" style="text-align:center">Generado por ARCE-CEREZO VALIDADOR &middot; ${esc(reg.fecha)}</div>
+</div></body></html>`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -134,7 +211,7 @@ REGLAS OBLIGATORIAS:
 - No escribas nada fuera de los bloques.`.trim();
 
 // ─────────────────────────────────────────────────────────────
-//  Llamada a Groq
+//  Llamada a la IA
 // ─────────────────────────────────────────────────────────────
 
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -231,7 +308,7 @@ function recomendacionesTexto(a) {
 
 async function analizar(codigo, nombre) {
   const ext = (nombre || "").split(".").pop();
-  // Se recorta el código para respetar el límite de tokens del plan gratis de Groq.
+  // Se recorta el código para respetar el límite de tokens del plan gratis.
   const user = `Analiza este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\n\`\`\`\n${codigo.slice(0, 7000)}\n\`\`\``;
   const raw = await groq(PROMPT_ANALISIS, user, 8000, 0, { reasoning_effort: "low" });
   return normalizarAnalisis(extraerJson(raw));
@@ -246,7 +323,6 @@ async function corregir(codigo, nombre, recomendaciones) {
 }
 
 // Aplica solo los bloques @@BUSCAR@@/@@REEMPLAZAR@@ que coinciden EXACTAMENTE con el código.
-// El resto del archivo queda intacto byte por byte; los bloques que no encajan se descartan.
 function aplicarParches(codigo, respuesta) {
   const re = /@@BUSCAR@@\r?\n([\s\S]*?)\r?\n@@REEMPLAZAR@@\r?\n([\s\S]*?)\r?\n@@FIN@@/g;
   let nuevo = codigo;
@@ -323,7 +399,6 @@ app.post("/api/corregir", async (req, res) => {
       if (i === MAX_ITER) break;
       const nuevo = await corregir(codigo, nombre, recomendacionesTexto(analisis));
       if (!nuevo || nuevo.trim() === codigo.trim()) break;
-      // Validador de integridad: no aplicar si salió recortado o introduce archivos inexistentes.
       if (nuevo.length < codigo.length * 0.6) break;
       const antes = refsExternas(codigo);
       const introduce = [...refsExternas(nuevo)].filter((r) => !antes.has(r));
@@ -331,12 +406,11 @@ app.post("/api/corregir", async (req, res) => {
       codigo = nuevo;
     }
 
-    // Guardar el reporte final de la corrección en el histórico.
-    if (analisis) guardarReporte(analisis, nombre);
+    const huboCorreccion = codigo.trim() !== original.trim();
+    if (analisis) guardarReporte(analisis, nombre, huboCorreccion);
 
-    // Explicar qué cambió (solo si hubo cambios reales)
     let cambios = [];
-    if (codigo.trim() !== original.trim()) {
+    if (huboCorreccion) {
       cambios = await resumirCambios(original, codigo, nombre);
     }
 
@@ -353,11 +427,6 @@ app.post("/api/corregir", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-//  Despliegue: escribe el archivo aprobado en la carpeta del HelpDesk.
-//  Seguridad: solo se admite un nombre de archivo simple (sin rutas)
-//  para evitar escritura fuera del directorio de despliegue (path traversal).
-// ─────────────────────────────────────────────────────────────
 app.post("/api/desplegar", async (req, res) => {
   try {
     const { codigo, nombre } = req.body;
@@ -380,28 +449,38 @@ app.post("/api/desplegar", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-//  Descarga de reportes por periodo: diario (1d), semanal (7d), mensual (30d).
-//  Devuelve un CSV (Excel) con todos los análisis del periodo elegido.
-// ─────────────────────────────────────────────────────────────
+app.get("/api/reportes/ver/:uid", (req, res) => {
+  const reg = leerHistorico().find((r) => r.uid === req.params.uid);
+  if (!reg) return res.status(404).send("Reporte no encontrado.");
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(reporteHtml(reg));
+});
+
 app.get("/api/reportes/:periodo", (req, res) => {
   try {
     const rangos = { diario: 1, semanal: 7, mensual: 30 };
     const dias = rangos[req.params.periodo] || 7;
-    const ruta = path.join(REPORTES_DIR, "historico.jsonl");
-    if (!fs.existsSync(ruta)) return res.status(404).send("Aun no hay reportes generados.");
     const desde = Date.now() - dias * 24 * 60 * 60 * 1000;
-    const registros = fs.readFileSync(ruta, "utf-8").trim().split("\n")
-      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
-      .filter((r) => r && new Date(r.fecha).getTime() >= desde);
-    let csv = "Fecha,Archivo,Puntuacion,Nivel de riesgo,Apto para despliegue\n";
+    const registros = leerHistorico().filter((r) => r && new Date(r.fecha).getTime() >= desde);
+    if (!registros.length) return res.status(404).send("Aun no hay reportes en este periodo.");
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const c = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+    const filas = [
+      ["Fecha y hora", "Archivo", "Puntuacion", "Nivel de riesgo", "Apto", "Corregido por IA", "Reporte"].join(";"),
+    ];
     for (const r of registros) {
       const a = r.analisis || {};
-      csv += `"${r.fecha}","${r.archivo}","${a.puntuacion_calidad ?? ""}","${a.nivel_riesgo ?? ""}","${a.apto_para_despliegue ? "Si" : "No"}"\n`;
+      const url = `${baseUrl}/api/reportes/ver/${r.uid}`;
+      const enlace = `=HYPERLINK(${c(url)},${c("Ver reporte")})`;
+      filas.push([
+        c(r.id_hora || r.fecha), c(r.archivo), c(a.puntuacion_calidad ?? ""),
+        c(a.nivel_riesgo ?? ""), c(a.apto_para_despliegue ? "Si" : "No"),
+        c(r.corregido ? "Si" : "No"), enlace,
+      ].join(";"));
     }
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="reportes-ia-${req.params.periodo}.csv"`);
-    res.send("\uFEFF" + csv);
+    res.send("\uFEFF" + filas.join("\r\n"));
   } catch (e) {
     res.status(500).send("Error: " + e.message);
   }
