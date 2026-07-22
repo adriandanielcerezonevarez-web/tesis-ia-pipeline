@@ -92,6 +92,7 @@ jobs:
         continue-on-error: true
         env:
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: |
           ARCHIVOS="${{ steps.archivos-modificados.outputs.lista_archivos }}"
           echo "Analizando: $ARCHIVOS"
