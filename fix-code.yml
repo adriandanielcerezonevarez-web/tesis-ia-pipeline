@@ -1,0 +1,274 @@
+# ============================================================
+#  CORRECCIÓN DE CÓDIGO CON IA — GitHub Actions Workflow
+# ============================================================
+#  Responde a comentarios en Pull Requests:
+#    /fix-ia      → la IA corrige el código ITERATIVAMENTE hasta 8/10
+#    /fix-manual  → registra que el desarrollador corrige a mano
+#
+#  Tesis: Diseño de un modelo de uso de IA en pipelines CI/CD
+#  Autor: Adrian Daniel Cerezo Nevarez
+# ============================================================
+
+name: "Corrección de Código con IA"
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────
+  #  /fix-ia : la IA corrige iterativamente hasta alcanzar 8/10
+  # ──────────────────────────────────────────────────────────
+  fix-ia:
+    name: "🤖 Corrección Automática con IA"
+    runs-on: ubuntu-latest
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/fix-ia')
+
+    steps:
+      - name: Reaccionar al comentario (procesando)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
+      - name: Obtener rama del Pull Request
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_ref', pr.data.head.ref);
+
+      - name: Checkout de la rama del PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Usa siempre los scripts de análisis/corrección más recientes de main
+      # (sin ensuciar el commit), aunque la rama del PR tenga versiones viejas.
+      - name: Sincronizar scripts desde main
+        run: |
+          git fetch origin main --depth=1 || true
+          git restore --source=origin/main --worktree -- scripts/ || true
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install openai
+
+      - name: Detectar archivos de código del PR
+        id: archivos
+        run: |
+          git fetch origin main --depth=1 || true
+          ARCHIVOS=$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          EXTENSIONES="py|js|ts|jsx|tsx|java|go|rb|php|cs|cpp|c|h|swift|kt|rs"
+          LISTA=$(echo "$ARCHIVOS" | grep -E "\.(${EXTENSIONES})$" | tr '\n' ' ' | xargs || true)
+          echo "Archivos detectados: $LISTA"
+          echo "lista=$LISTA" >> $GITHUB_OUTPUT
+
+      - name: Corregir iterativamente con IA (hasta 8/10)
+        if: steps.archivos.outputs.lista != ''
+        env:
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          ARCHIVOS="${{ steps.archivos.outputs.lista }}"
+          echo "===== Corrección iterativa con IA (objetivo: 8/10) ====="
+          python scripts/ai_fix_iterativo.py --umbral 7 --max-iter 4 $ARCHIVOS
+          echo "===== Análisis final del código corregido ====="
+          python scripts/ai_code_analyzer.py --json --output reporte-despues.md $ARCHIVOS || true
+
+      - name: Commit y push de las correcciones
+        id: commit
+        if: steps.archivos.outputs.lista != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ${{ steps.archivos.outputs.lista }}
+          if git diff --cached --quiet; then
+            echo "cambios=false" >> $GITHUB_OUTPUT
+            echo "No hubo cambios que aplicar."
+          else
+            git commit -m "fix(ia): correcciones automáticas iterativas aplicadas por IA"
+            git push origin HEAD:${{ steps.pr.outputs.head_ref }}
+            echo "cambios=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publicar reporte de la corrección en el PR
+        if: always() && steps.archivos.outputs.lista != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let cuerpo = '## 🤖 Corrección automática con IA (`/fix-ia`)\n\n';
+
+            // Progresión de la puntuación (antes -> después de cada iteración)
+            try {
+              const hist = JSON.parse(fs.readFileSync('historial-correccion.json', 'utf8'));
+              cuerpo += '### 📈 Progresión de la puntuación de calidad\n\n';
+              for (const [archivo, scores] of Object.entries(hist)) {
+                const linea = scores.length ? scores.join(' → ') + ' / 10' : 'sin datos';
+                const ok = scores.length && scores[scores.length - 1] >= 8 ? ' ✅' : ' ⚠️';
+                cuerpo += '- `' + archivo + '`: **' + linea + '**' + ok + '\n';
+              }
+              cuerpo += '\n';
+            } catch (e) {}
+
+            const cambios = '${{ steps.commit.outputs.cambios }}';
+            if (cambios === 'true') {
+              cuerpo += 'La IA aplicó correcciones y subió un nuevo commit a esta rama. ';
+              cuerpo += 'Puedes ver los cambios línea por línea en la pestaña **Files changed** del PR.\n\n';
+            } else {
+              cuerpo += 'La IA no encontró más cambios que aplicar.\n\n';
+            }
+
+            cuerpo += '<details><summary>Ver reporte de calidad tras la corrección</summary>\n\n';
+            try {
+              cuerpo += fs.readFileSync('reporte-despues.md', 'utf8').substring(0, 50000);
+            } catch (e) {
+              cuerpo += '_No se pudo generar el reporte posterior._';
+            }
+            cuerpo += '\n\n</details>';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: cuerpo
+            });
+
+      - name: Avisar si no había archivos de código
+        if: steps.archivos.outputs.lista == ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '⚠️ No se detectaron archivos de código en este PR para corregir con IA.'
+            });
+
+  # ──────────────────────────────────────────────────────────
+  #  /fix-manual : el desarrollador corrige el código a mano
+  # ──────────────────────────────────────────────────────────
+  fix-manual:
+    name: "📝 Corrección Manual"
+    runs-on: ubuntu-latest
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/fix-manual')
+
+    steps:
+      - name: Reaccionar y publicar instrucciones
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: '+1'
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '📝 **Modo corrección manual seleccionado.**\n\nRevisa las recomendaciones del reporte de análisis de IA en este Pull Request, aplica los cambios en tu código y vuelve a subir un commit a esta rama. El pipeline analizará automáticamente los nuevos cambios y actualizará la puntuación de calidad.'
+            });
+
+  # ──────────────────────────────────────────────────────────
+  #  /desplegar-forzado : despliega el código del PR AUNQUE no pase el gate
+  # ──────────────────────────────────────────────────────────
+  desplegar-forzado:
+    name: "⚠️ Despliegue Forzado (a pesar de los riesgos)"
+    runs-on: ubuntu-latest
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/desplegar-forzado')
+    steps:
+      - name: Reaccionar al comentario
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+      - name: Obtener rama del Pull Request
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_ref', pr.data.head.ref);
+      - name: Desplegar el código del PR en el VPS (forzado)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          PR_BRANCH: ${{ steps.pr.outputs.head_ref }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: "20m"
+          envs: PR_BRANCH
+          script: |
+            set -e
+            echo "⚠️ DESPLIEGUE FORZADO a pesar de los riesgos — rama: $PR_BRANCH"
+            REPO=/root/tesis-ia-pipeline
+            if [ ! -d "$REPO/.git" ]; then
+              git clone https://github.com/adriandanielcerezonevarez-web/tesis-ia-pipeline.git "$REPO"
+            fi
+            cd "$REPO"
+            git fetch origin "$PR_BRANCH"
+            git reset --hard "origin/$PR_BRANCH"
+            docker rm -f helpdesk helpdesk-prod helpdesk-staging 2>/dev/null || true
+            cd "$REPO/helpdesk-deploy"
+            docker compose up -d --build --remove-orphans
+            docker image prune -f
+            echo "✅ Despliegue forzado completado."
+      - name: Registrar el despliegue forzado en el PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const quien = context.payload.comment.user.login;
+            const fecha = new Date().toISOString();
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '## ⚠️ Despliegue FORZADO a pesar de los riesgos\n\n' +
+                    '**Forzado por:** @' + quien + '\n' +
+                    '**Fecha:** ' + fecha + '\n\n' +
+                    'El código de esta rama se desplegó al VPS **sin pasar el Quality Gate**. Queda registrado para trazabilidad.\n\n' +
+                    'HelpDesk: https://helpdesk-arce.duckdns.org'
+            });
