@@ -3,7 +3,7 @@ const SESSION_KEY = 'helpdesk_session';
 const USERS_KEY = 'helpdesk_users';
 const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
-
+quitame
 let session = null;
 
 // firebase (puede acabar null si no hay config)
