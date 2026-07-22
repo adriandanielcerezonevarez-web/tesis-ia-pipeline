@@ -738,7 +738,10 @@ function renderReports() {
   ].map(([l, v]) => `<div class="report-item"><span class="report-item-label">${l}</span><span class="report-item-value">${v}</span></div>`).join('');
 }
 
-
+function exportJSON() {
+  const data = JSON.stringify({ tickets, users }, null, 2);
+  downloadFile('helpdesk_backup.json', data, 'application/json');
+}
 
 // Lista de campos exportables (configurable)
 const CSV_FIELDS = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
