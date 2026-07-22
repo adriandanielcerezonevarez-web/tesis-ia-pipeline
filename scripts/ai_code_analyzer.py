@@ -32,6 +32,10 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 # ─────────────────────────────────────────────────────────────
 
 MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
+# El modelo efectivo puede ajustarse por entorno (variable LLM_MODEL) sin tocar el código
+MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
+# GLM requiere desactivar razonamiento cuando se usa temperatura determinista
+ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
 TEMPERATURA = 0                           # Temperatura 0 = máxima consistencia (igual que el validador)
 MAX_TOKENS = 9000                        # Amplio: gpt-oss "razona" antes de responder
 
@@ -195,14 +199,14 @@ Proporciona el análisis completo en el formato JSON especificado.
 
     try:
         respuesta = cliente.chat.completions.create(
-            model=MODELO_IA,
+            model=MODELO_API,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": mensaje_usuario},
             ],
             temperature=TEMPERATURA,
             max_tokens=MAX_TOKENS,
-            reasoning_effort="low",
+            reasoning_effort=ESFUERZO,
         )
 
         contenido_respuesta = respuesta.choices[0].message.content.strip()

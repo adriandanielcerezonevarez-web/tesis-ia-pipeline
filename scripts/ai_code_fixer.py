@@ -34,6 +34,8 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 # ─────────────────────────────────────────────────────────────
 
 MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
+MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
+ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
 TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras y consistentes
 MAX_TOKENS = 15000                        # Amplio: gpt-oss razona y devuelve el archivo completo
 
@@ -217,14 +219,14 @@ Devuelve únicamente los cambios en el formato de parches @@BUSCAR@@/@@REEMPLAZA
 
     try:
         respuesta = cliente.chat.completions.create(
-            model=MODELO_IA,
+            model=MODELO_API,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": mensaje_usuario},
             ],
             temperature=TEMPERATURA,
             max_tokens=MAX_TOKENS,
-            reasoning_effort="low",
+            reasoning_effort=ESFUERZO,
         )
         contenido = respuesta.choices[0].message.content.strip()
         # Aplicar solo los cambios puntuales (parches) que coincidan exactamente con el código.
