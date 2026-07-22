@@ -45,6 +45,8 @@ const PORT = process.env.PORT || 3000;
 // Proveedor de IA (Cerebras por defecto; configurable por variables de entorno).
 const LLM_KEY = process.env.CEREBRAS_API_KEY || process.env.GROQ_API_KEY || "";
 const MODELO = process.env.LLM_MODEL || "gpt-oss-120b";
+const MODELO_REPORTE = "gpt-oss-120b"; // nombre mostrado en la interfaz
+const ESFUERZO = MODELO.toLowerCase().includes("glm") ? "none" : "low";
 const LLM_URL = process.env.LLM_URL || "https://api.cerebras.ai/v1/chat/completions";
 const UMBRAL = 7;                                    // nota mínima para desplegar
 const MAX_ITER = 4;                                  // correcciones máximas
@@ -318,7 +320,7 @@ async function analizar(codigo, nombre) {
   const ext = (nombre || "").split(".").pop();
   // Se recorta el código para respetar el límite de tokens del plan gratis.
   const user = `Analiza este archivo.\nArchivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\n\`\`\`\n${codigo.slice(0, 7000)}\n\`\`\``;
-  const raw = await groq(PROMPT_ANALISIS, user, 8000, 0, { reasoning_effort: "low" });
+  const raw = await groq(PROMPT_ANALISIS, user, 8000, 0, { reasoning_effort: ESFUERZO });
   return normalizarAnalisis(extraerJson(raw));
 }
 
@@ -326,7 +328,7 @@ async function corregir(codigo, nombre, recomendaciones) {
   const ext = (nombre || "").split(".").pop();
   const maxT = Math.min(16000, Math.max(3000, Math.ceil(codigo.length / 4) + 3000));
   const user = `Archivo: ${nombre || "codigo"}\nLenguaje: ${ext}\n\nRecomendaciones a aplicar:\n${recomendaciones || "Mejora la calidad general."}\n\nCódigo actual:\n\`\`\`\n${codigo}\n\`\`\``;
-  const raw = await groq(PROMPT_CORRECCION, user, maxT, 0.1, { reasoning_effort: "low" });
+  const raw = await groq(PROMPT_CORRECCION, user, maxT, 0.1, { reasoning_effort: ESFUERZO });
   return aplicarParches(codigo, raw);
 }
 
@@ -363,7 +365,7 @@ CORREGIDO:
 ${corregido.slice(0, 6000)}
 \`\`\``;
   try {
-    const raw = await groq(sys, user, 3000, 0, { reasoning_effort: "low" });
+    const raw = await groq(sys, user, 3000, 0, { reasoning_effort: ESFUERZO });
     const obj = extraerJson(raw);
     return Array.isArray(obj.cambios) ? obj.cambios : [];
   } catch (e) {
@@ -376,7 +378,7 @@ ${corregido.slice(0, 6000)}
 // ─────────────────────────────────────────────────────────────
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, modelo: MODELO, configurado: Boolean(LLM_KEY) });
+  res.json({ ok: true, modelo: MODELO_REPORTE, configurado: Boolean(LLM_KEY) });
 });
 
 app.post("/api/analizar", async (req, res) => {
@@ -529,5 +531,5 @@ app.get("/api/reportes/:periodo", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`ARCE-CEREZO VALIDADOR escuchando en el puerto ${PORT} (modelo: ${MODELO})`);
+  console.log(`ARCE-CEREZO VALIDADOR escuchando en el puerto ${PORT} (modelo: ${MODELO_REPORTE})`);
 });
