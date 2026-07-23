@@ -882,7 +882,7 @@ async function saveUser(e) {
     try {
       if (id) {
         const u = users.find(x => x.id === id);
-        if (u && u.username === 'admin' && role !== 'admin') {
+        if (u && u.username === 'admin'  role !== 'admin') {
           showToast('El admin principal no puede cambiar de rol', 'error'); return;
         }
         const updateData = { username, name, email, role };
