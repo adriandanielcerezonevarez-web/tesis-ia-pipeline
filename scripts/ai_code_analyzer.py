@@ -10,6 +10,7 @@ Autor: Adrian Daniel Cerezo Nevarez
 """
 
 import os
+import time
 import sys
 import json
 import argparse
@@ -36,6 +37,23 @@ MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) ví
 MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
 # GLM requiere desactivar razonamiento cuando se usa temperatura determinista
 ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
+
+def completar_con_reintentos(cliente, intentos=4, espera=12, **kwargs):
+    """
+    Llama a la API con reintentos automáticos ante saturación (error 429).
+    Espera creciente: 12s, 24s, 48s. Si persiste, propaga el error.
+    """
+    for i in range(intentos):
+        try:
+            return cliente.chat.completions.create(**kwargs)
+        except Exception as e:
+            if ("429" in str(e) or "too_many_requests" in str(e)) and i < intentos - 1:
+                print(f"  [AVISO] API saturada (429). Reintento {i + 1}/{intentos - 1} en {espera}s...")
+                time.sleep(espera)
+                espera *= 2
+            else:
+                raise
+
 
 # ─── Límite de contexto (GLM en Cerebras acepta máx. 8192 tokens por petición) ───
 MAX_CHARS_CODIGO = 12000 if "glm" in MODELO_API.lower() else 10**9
@@ -231,7 +249,7 @@ Proporciona el análisis completo en el formato JSON especificado.
 """.strip()
 
     try:
-        respuesta = cliente.chat.completions.create(
+        respuesta = completar_con_reintentos(cliente,
             model=MODELO_API,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
