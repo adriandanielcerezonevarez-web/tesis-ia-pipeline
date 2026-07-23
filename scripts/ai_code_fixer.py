@@ -36,8 +36,41 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
 MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
 ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
+
+# ─── Límite de contexto (GLM en Cerebras acepta máx. 8192 tokens por petición) ───
+MAX_CHARS_CODIGO = 12000 if "glm" in MODELO_API.lower() else 10**9
+
+
+def recortar_codigo(codigo: str, cambios: str, max_chars: int = None):
+    """
+    Si el archivo supera el límite de contexto del modelo, retorna solo un
+    fragmento centrado en las líneas cambiadas del PR (ventanas de ±40 líneas).
+    Los parches @@BUSCAR@@ se aplican después sobre el archivo COMPLETO, por lo
+    que recortar el prompt no afecta la aplicación de las correcciones.
+    """
+    max_chars = max_chars or MAX_CHARS_CODIGO
+    if len(codigo) <= max_chars:
+        return codigo, False
+    lineas = codigo.split("\n")
+    objetivo = {c.strip() for c in (cambios or "").split("\n") if c.strip()}
+    indices = [i for i, l in enumerate(lineas) if l.strip() and l.strip() in objetivo]
+    if not indices:
+        return codigo[:max_chars], True
+    ventanas = []
+    for i in indices:
+        a, b = max(0, i - 40), min(len(lineas), i + 41)
+        if ventanas and a <= ventanas[-1][1]:
+            ventanas[-1][1] = max(ventanas[-1][1], b)
+        else:
+            ventanas.append([a, b])
+    partes = ["\n".join(lineas[a:b]) for a, b in ventanas]
+    frag = "\n\n... (resto del archivo omitido por límite de contexto) ...\n\n".join(partes)
+    return frag[:max_chars], True
+
 TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras y consistentes
-MAX_TOKENS = 15000                        # Amplio: gpt-oss razona y devuelve el archivo completo
+MAX_TOKENS = 15000
+if "glm" in (os.environ.get("LLM_MODEL") or "").lower():
+    MAX_TOKENS = 3000                     # GLM: los parches son cortos; cabe en el limite de 8192                        # Amplio: gpt-oss razona y devuelve el archivo completo
 
 SYSTEM_PROMPT = """
 Eres un ingeniero experto en calidad de código. Recibes un archivo y recomendaciones de mejora.
@@ -191,6 +224,10 @@ def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
         "según las 7 dimensiones."
     )
 
+    codigo_prompt, recortado = recortar_codigo(codigo, cambios)
+    if recortado:
+        print(f"  Prompt recortado a {len(codigo_prompt)} caracteres (limite de contexto del modelo).")
+
     bloque_enfoque = ""
     if cambios:
         bloque_enfoque = f"""
@@ -211,7 +248,7 @@ Corrige y mejora el siguiente archivo de código.
 {bloque_enfoque}
 **Código actual:**
 ```{extension}
-{codigo}
+{codigo_prompt}
 ```
 
 Devuelve únicamente los cambios en el formato de parches @@BUSCAR@@/@@REEMPLAZAR@@/@@FIN@@ indicado.

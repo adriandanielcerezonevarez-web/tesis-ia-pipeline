@@ -36,8 +36,41 @@ MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) ví
 MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
 # GLM requiere desactivar razonamiento cuando se usa temperatura determinista
 ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
+
+# ─── Límite de contexto (GLM en Cerebras acepta máx. 8192 tokens por petición) ───
+MAX_CHARS_CODIGO = 12000 if "glm" in MODELO_API.lower() else 10**9
+
+
+def recortar_codigo(codigo: str, cambios: str, max_chars: int = None):
+    """
+    Si el archivo supera el límite de contexto del modelo, retorna solo un
+    fragmento centrado en las líneas cambiadas del PR (ventanas de ±40 líneas).
+    Los parches @@BUSCAR@@ se aplican después sobre el archivo COMPLETO, por lo
+    que recortar el prompt no afecta la aplicación de las correcciones.
+    """
+    max_chars = max_chars or MAX_CHARS_CODIGO
+    if len(codigo) <= max_chars:
+        return codigo, False
+    lineas = codigo.split("\n")
+    objetivo = {c.strip() for c in (cambios or "").split("\n") if c.strip()}
+    indices = [i for i, l in enumerate(lineas) if l.strip() and l.strip() in objetivo]
+    if not indices:
+        return codigo[:max_chars], True
+    ventanas = []
+    for i in indices:
+        a, b = max(0, i - 40), min(len(lineas), i + 41)
+        if ventanas and a <= ventanas[-1][1]:
+            ventanas[-1][1] = max(ventanas[-1][1], b)
+        else:
+            ventanas.append([a, b])
+    partes = ["\n".join(lineas[a:b]) for a, b in ventanas]
+    frag = "\n\n... (resto del archivo omitido por límite de contexto) ...\n\n".join(partes)
+    return frag[:max_chars], True
+
 TEMPERATURA = 0                           # Temperatura 0 = máxima consistencia (igual que el validador)
-MAX_TOKENS = 9000                        # Amplio: gpt-oss "razona" antes de responder
+MAX_TOKENS = 9000
+if "glm" in (os.environ.get("LLM_MODEL") or "").lower():
+    MAX_TOKENS = 2500                     # GLM: el reporte JSON es corto; cabe en el limite de 8192                        # Amplio: gpt-oss "razona" antes de responder
 
 # Criterios de análisis que evalúa la IA
 DIMENSIONES_ANALISIS = [
