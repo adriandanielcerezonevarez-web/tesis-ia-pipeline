@@ -243,8 +243,14 @@ def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
     )
 
     codigo_prompt, recortado = recortar_codigo(codigo, cambios)
+    nota_fragmento = ""
     if recortado:
         print(f"  Prompt recortado a {len(codigo_prompt)} caracteres (limite de contexto del modelo).")
+        nota_fragmento = (
+            "\nADVERTENCIA: El codigo mostrado es un FRAGMENTO del archivo; hay mas codigo antes y despues. "
+            "NO intentes balancear llaves ni cerrar funciones que no aparecen completas. "
+            "Tus parches deben tocar UNICAMENTE las lineas indicadas como cambiadas.\n"
+        )
 
     bloque_enfoque = ""
     if cambios:
@@ -264,7 +270,7 @@ Corrige y mejora el siguiente archivo de código.
 **Recomendaciones a aplicar:**
 {bloque_recs}
 {bloque_enfoque}
-**Código actual:**
+{nota_fragmento}**Código actual:**
 ```{extension}
 {codigo_prompt}
 ```

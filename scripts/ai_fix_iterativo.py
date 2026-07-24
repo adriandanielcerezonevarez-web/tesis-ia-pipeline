@@ -159,22 +159,31 @@ def main():
                       f"(mejor puntuación: {score}).\n")
                 break
 
-            # Corregir aplicando las recomendaciones del análisis actual
+            # Corregir aplicando las recomendaciones del análisis actual.
+            # Si la corrección rompe la integridad, se reintenta UNA vez
+            # informando al modelo el error exacto que produjo.
             recomendaciones = construir_recomendaciones(analisis)
-            corregido = corregir_con_ia(cliente, codigo_actual, nombre, extension, recomendaciones, cambios)
-
-            if not corregido or corregido.strip() == codigo_actual.strip():
-                print(f"   = La IA no aplicó más cambios; se detiene.\n")
+            aviso = ""
+            aplicado = False
+            for intento in range(2):
+                corregido = corregir_con_ia(cliente, codigo_actual, nombre, extension,
+                                            recomendaciones + aviso, cambios)
+                if not corregido or corregido.strip() == codigo_actual.strip():
+                    break
+                valido, motivo = validar_integridad(codigo_actual, corregido, ruta)
+                if valido:
+                    Path(ruta).write_text(corregido, encoding="utf-8")
+                    aplicado = True
+                    break
+                print(f"   🛡️ Corrección descartada (intento {intento + 1}): {motivo}.")
+                aviso = (
+                    "\n- [MUY IMPORTANTE] Tu parche anterior fue RECHAZADO porque produjo: "
+                    f"{motivo}. Devuelve un parche MÍNIMO que corrija solo la línea dañada "
+                    "SIN agregar ni quitar llaves, paréntesis o bloques fuera de esa línea."
+                )
+            if not aplicado:
+                print(f"   = No se pudo aplicar una corrección segura; se detiene.\n")
                 break
-
-            # VALIDADOR DE INTEGRIDAD: no aplicar la corrección si rompería el proyecto.
-            valido, motivo = validar_integridad(codigo_actual, corregido, ruta)
-            if not valido:
-                print(f"   🛡️ Corrección DESCARTADA por seguridad: {motivo}.")
-                print(f"      Se conserva la versión anterior para no romper el proyecto.\n")
-                break
-
-            Path(ruta).write_text(corregido, encoding="utf-8")
 
         historial[ruta] = scores
 
