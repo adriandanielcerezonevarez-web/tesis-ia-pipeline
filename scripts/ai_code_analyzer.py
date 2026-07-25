@@ -32,7 +32,7 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 #  CONFIGURACIÓN DEL MODELO DE IA
 # ─────────────────────────────────────────────────────────────
 
-MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
+MODELO_IA = "zai-glm-4.7"               # Modelo open source (GPT-OSS 120B) vía Cerebras
 # El modelo efectivo puede ajustarse por entorno (variable LLM_MODEL) sin tocar el código
 MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
 # GLM requiere desactivar razonamiento cuando se usa temperatura determinista
