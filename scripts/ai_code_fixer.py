@@ -34,7 +34,7 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 #  CONFIGURACIÓN DEL MODELO DE IA (igual que el analizador)
 # ─────────────────────────────────────────────────────────────
 
-MODELO_IA = "gpt-oss-120b"               # Modelo open source (GPT-OSS 120B) vía Cerebras
+MODELO_IA = "zai-glm-4.7"               # Modelo open source (GPT-OSS 120B) vía Cerebras
 MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
 ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
 
