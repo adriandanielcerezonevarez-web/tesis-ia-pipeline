@@ -96,8 +96,14 @@ jobs:
         run: |
           ARCHIVOS="${{ steps.archivos-modificados.outputs.lista_archivos }}"
           echo "Analizando: $ARCHIVOS"
+          # Capturamos el codigo de salida SIN que 'set -e' aborte el paso,
+          # para que el Quality Gate reciba correctamente 0 (apto) o 1 (bloqueado).
+          set +e
           python scripts/ai_code_analyzer.py --output reporte-ia.md --json --umbral 7.0 $ARCHIVOS
-          echo "codigo_salida=$?" >> $GITHUB_OUTPUT
+          CODE=$?
+          set -e
+          echo "codigo_salida=$CODE" >> $GITHUB_OUTPUT
+          echo "El analizador devolvio codigo_salida=$CODE (0=apto, 1=bloqueado)."
       - name: Publicar reporte de IA en el Pull Request
         if: always() && github.event_name == 'pull_request' && steps.archivos-modificados.outputs.archivos_encontrados == 'true'
         uses: actions/github-script@v7
@@ -108,6 +114,15 @@ jobs:
             let reporte = '';
             try { reporte = fs.readFileSync('reporte-ia.md', 'utf8'); }
             catch (e) { reporte = 'No se pudo generar el reporte de analisis de IA.'; }
+            // Si el codigo quedo bloqueado, ofrecer el comando /fix-ia al usuario.
+            const codigo = '${{ steps.analisis-ia.outputs.codigo_salida }}';
+            if (codigo === '1') {
+              reporte += '\n\n---\n\n' +
+                '### ⚠️ Este código no alcanzó el umbral de calidad (7/10)\n\n' +
+                'El despliegue a producción está **bloqueado**. Tienes dos opciones:\n\n' +
+                '- Comenta **`/fix-ia`** para que la IA corrija el código automáticamente según las recomendaciones de arriba.\n' +
+                '- Comenta **`/fix-manual`** si prefieres corregirlo tú y volver a subir un commit.\n';
+            }
             if (reporte.length > 60000) reporte = reporte.substring(0, 60000) + '\n\n*[Reporte truncado]*';
             const { data: comentarios } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
