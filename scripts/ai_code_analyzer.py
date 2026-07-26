@@ -32,11 +32,17 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 #  CONFIGURACIÓN DEL MODELO DE IA
 # ─────────────────────────────────────────────────────────────
 
-MODELO_IA = "zai-glm-4.7"               # Modelo open source (GPT-OSS 120B) vía Cerebras
-# El modelo efectivo puede ajustarse por entorno (variable LLM_MODEL) sin tocar el código
+MODELO_IA = "zai-glm-4.7"                # Modelo por defecto (GLM 4.7, open source, vía Cerebras)
+# El modelo efectivo puede ajustarse por entorno (variable LLM_MODEL) sin tocar el código.
 MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
-# GLM requiere desactivar razonamiento cuando se usa temperatura determinista
-ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
+ES_GLM = "glm" in MODELO_API.lower()
+# GLM requiere desactivar el razonamiento cuando se usa temperatura determinista.
+ESFUERZO = "none" if ES_GLM else "low"
+
+TEMPERATURA = 0                           # Temperatura 0 = máxima consistencia
+# GLM 4.7 en Cerebras: contexto 131k, salida hasta 40k tokens. 9000 basta para el JSON del reporte.
+MAX_TOKENS = 9000
+
 
 def completar_con_reintentos(cliente, intentos=4, espera=12, **kwargs):
     """
@@ -54,41 +60,6 @@ def completar_con_reintentos(cliente, intentos=4, espera=12, **kwargs):
             else:
                 raise
 
-
-# ─── Límite de contexto (GLM en Cerebras acepta máx. 8192 tokens por petición) ───
-MAX_CHARS_CODIGO = 12000 if "glm" in MODELO_API.lower() else 10**9
-
-
-def recortar_codigo(codigo: str, cambios: str, max_chars: int = None):
-    """
-    Si el archivo supera el límite de contexto del modelo, retorna solo un
-    fragmento centrado en las líneas cambiadas del PR (ventanas de ±40 líneas).
-    Los parches @@BUSCAR@@ se aplican después sobre el archivo COMPLETO, por lo
-    que recortar el prompt no afecta la aplicación de las correcciones.
-    """
-    max_chars = max_chars or MAX_CHARS_CODIGO
-    if len(codigo) <= max_chars:
-        return codigo, False
-    lineas = codigo.split("\n")
-    objetivo = {c.strip() for c in (cambios or "").split("\n") if c.strip()}
-    indices = [i for i, l in enumerate(lineas) if l.strip() and l.strip() in objetivo]
-    if not indices:
-        return codigo[:max_chars], True
-    ventanas = []
-    for i in indices:
-        a, b = max(0, i - 40), min(len(lineas), i + 41)
-        if ventanas and a <= ventanas[-1][1]:
-            ventanas[-1][1] = max(ventanas[-1][1], b)
-        else:
-            ventanas.append([a, b])
-    partes = ["\n".join(lineas[a:b]) for a, b in ventanas]
-    frag = "\n\n... (resto del archivo omitido por límite de contexto) ...\n\n".join(partes)
-    return frag[:max_chars], True
-
-TEMPERATURA = 0                           # Temperatura 0 = máxima consistencia (igual que el validador)
-MAX_TOKENS = 9000
-if "glm" in (os.environ.get("LLM_MODEL") or "").lower():
-    MAX_TOKENS = 2500                     # GLM: el reporte JSON es corto; cabe en el limite de 8192                        # Amplio: gpt-oss "razona" antes de responder
 
 # Criterios de análisis que evalúa la IA
 DIMENSIONES_ANALISIS = [
@@ -187,9 +158,6 @@ def obtener_cambios(ruta: str) -> str:
         subprocess.run(["git", "fetch", "--depth=1", "origin", base],
                        capture_output=True, timeout=40)
         referencia = f"origin/{base}"
-
-
-
         salida = subprocess.run(
             ["git", "diff", "--unified=0", referencia, "--", ruta],
             capture_output=True, text=True, timeout=40,
@@ -206,19 +174,11 @@ def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str, c
     """
     Envía el código al modelo de IA y retorna el análisis estructurado.
 
-    Parámetros:
-        cliente: Instancia del cliente de IA
-        codigo: Contenido del archivo de código (contexto completo)
-        nombre_archivo: Nombre del archivo para contexto
-        extension: Extensión del lenguaje (py, js, java, etc.)
-        cambios: Líneas nuevas/modificadas del PR. Si viene con contenido, el
-                 análisis se enfoca SOLO en esas líneas y usa el resto como contexto.
-
     Retorna:
         dict con el análisis completo o dict de error
     """
     # Truncar código muy largo para respetar límites del contexto
-    max_chars = 12000
+    max_chars = 100000
     if len(codigo) > max_chars:
         codigo = codigo[:max_chars] + f"\n\n[... ARCHIVO TRUNCADO - {len(codigo) - max_chars} caracteres adicionales no mostrados ...]"
 
@@ -260,10 +220,10 @@ Proporciona el análisis completo en el formato JSON especificado.
             reasoning_effort=ESFUERZO,
         )
 
-        contenido_respuesta = respuesta.choices[0].message.content.strip()
+        contenido_respuesta = (respuesta.choices[0].message.content or "").strip()
 
         # Limpiar delimitadores markdown y extraer el objeto JSON
-        # (gpt-oss puede agregar texto de razonamiento alrededor del JSON).
+        # (algunos modelos agregan texto alrededor del JSON).
         if contenido_respuesta.startswith("```"):
             lineas = contenido_respuesta.split("\n")
             contenido_respuesta = "\n".join(lineas[1:-1])
@@ -303,19 +263,13 @@ Proporciona el análisis completo en el formato JSON especificado.
 def generar_reporte_markdown(resultados: list[dict]) -> str:
     """
     Genera un reporte Markdown completo a partir de los análisis de todos los archivos.
-
-    Parámetros:
-        resultados: Lista de análisis por archivo
-
-    Retorna:
-        str con el reporte en formato Markdown
     """
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     lineas = [
         "# Reporte de Análisis de Calidad de Código — Pipeline CI/CD",
         f"*Generado automáticamente el {ahora} por el modelo de IA integrado en el pipeline CI/CD*",
-        f"*Modelo utilizado: `{MODELO_IA}` (open source vía Groq API)*",
+        f"*Modelo utilizado: `{MODELO_API}` (open source vía Cerebras)*",
         "",
         "---",
         "",
@@ -516,7 +470,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"  ANALIZADOR DE CÓDIGO CON IA — Pipeline CI/CD")
-    print(f"  Modelo: {MODELO_IA}")
+    print(f"  Modelo: {MODELO_API}")
     print(f"{'='*60}\n")
 
     resultados = []

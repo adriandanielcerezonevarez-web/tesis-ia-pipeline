@@ -4,7 +4,13 @@ ai_code_fixer.py
 ================
 Módulo de corrección automática de código con IA para pipelines CI/CD.
 Toma el código y las recomendaciones del análisis previo (ai_code_analyzer.py)
-y usa el modelo de lenguaje para reescribir el código aplicando las mejoras.
+y usa el modelo de lenguaje para corregir el código aplicando las mejoras.
+
+Estrategia de corrección (en dos capas):
+  1) PARCHES QUIRÚRGICOS @@BUSCAR@@/@@REEMPLAZAR@@ (cambios mínimos y seguros).
+  2) Si ningún parche coincide, REESCRITURA COMPLETA del archivo (respaldo).
+     La reescritura la valida después el validador de integridad del orquestador
+     (ai_fix_iterativo.py), así nunca puede romper el proyecto.
 
 Comando en el Pull Request: /fix-ia
 
@@ -34,9 +40,19 @@ CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 #  CONFIGURACIÓN DEL MODELO DE IA (igual que el analizador)
 # ─────────────────────────────────────────────────────────────
 
-MODELO_IA = "zai-glm-4.7"               # Modelo open source (GPT-OSS 120B) vía Cerebras
+MODELO_IA = "zai-glm-4.7"                # Modelo por defecto (GLM 4.7, open source, vía Cerebras)
+# El modelo efectivo puede ajustarse por entorno (variable LLM_MODEL) sin tocar el código.
 MODELO_API = (os.environ.get("LLM_MODEL") or "").strip() or MODELO_IA
-ESFUERZO = "none" if "glm" in MODELO_API.lower() else "low"
+ES_GLM = "glm" in MODELO_API.lower()
+# GLM requiere desactivar el razonamiento cuando se usa temperatura determinista.
+ESFUERZO = "none" if ES_GLM else "low"
+
+TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras y consistentes
+# GLM 4.7 en Cerebras: contexto 131k, salida hasta 40k tokens. Damos margen amplio.
+MAX_TOKENS = 16000 if ES_GLM else 15000
+# Caracteres máximos de código enviados en el prompt (el archivo completo cabe de sobra).
+MAX_CHARS_CODIGO = 100000
+
 
 def completar_con_reintentos(cliente, intentos=4, espera=12, **kwargs):
     """
@@ -53,10 +69,6 @@ def completar_con_reintentos(cliente, intentos=4, espera=12, **kwargs):
                 espera *= 2
             else:
                 raise
-
-
-# ─── Límite de contexto (GLM en Cerebras acepta máx. 8192 tokens por petición) ───
-MAX_CHARS_CODIGO = 12000 if "glm" in MODELO_API.lower() else 10**9
 
 
 def recortar_codigo(codigo: str, cambios: str, max_chars: int = None):
@@ -85,15 +97,10 @@ def recortar_codigo(codigo: str, cambios: str, max_chars: int = None):
     frag = "\n\n... (resto del archivo omitido por límite de contexto) ...\n\n".join(partes)
     return frag[:max_chars], True
 
-TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras y consistentes
-MAX_TOKENS = 15000
-if "glm" in (os.environ.get("LLM_MODEL") or "").lower():
-    MAX_TOKENS = 3000                     # GLM: los parches son cortos; cabe en el limite de 8192                        # Amplio: gpt-oss razona y devuelve el archivo completo
 
 SYSTEM_PROMPT = """
 Eres un ingeniero experto en calidad de código. Recibes un archivo y recomendaciones de mejora.
-NO reescribas el archivo completo. Devuelve SOLO cambios puntuales (quirúrgicos) en bloques con
-este formato EXACTO:
+DEBES devolver SOLO cambios puntuales (quirúrgicos) en bloques con este formato EXACTO:
 
 @@BUSCAR@@
 <fragmento EXACTO del código original, copiado carácter por carácter, con varias líneas de
@@ -102,19 +109,33 @@ contexto para que sea único e inconfundible dentro del archivo>
 <ese mismo fragmento, pero corregido>
 @@FIN@@
 
-REGLAS OBLIGATORIAS:
-- El texto entre @@BUSCAR@@ y @@REEMPLAZAR@@ debe existir EXACTAMENTE en el código (misma
-  indentación, mismas comillas, mismos espacios). Cópialo literal; si no coincide, se descarta.
+REGLAS OBLIGATORIAS (STRICTLY):
+- El texto entre @@BUSCAR@@ y @@REEMPLAZAR@@ DEBE existir EXACTAMENTE en el código (misma
+  indentación, mismas comillas, mismos espacios). Cópialo LITERAL; si no coincide, se descarta.
 - Haz cambios MÍNIMOS enfocados en: ERRORES DE SINTAXIS, líneas basura o identificadores sin sentido,
   código muerto, seguridad (credenciales, inyección), validación de datos y manejo de errores.
-- APLICA SIEMPRE las recomendaciones que recibes en el mensaje. Si una recomendación pide eliminar una
-  línea (por ejemplo una línea basura que rompe la sintaxis), elimínala.
+- APLICA SIEMPRE las recomendaciones que recibes. Si una recomendación pide eliminar una línea
+  (por ejemplo una línea basura que rompe la sintaxis), elimínala.
 - Para ELIMINAR una línea, cópiala en @@BUSCAR@@ junto con 1 o 2 líneas de contexto y OMÍTELA en
   @@REEMPLAZAR@@ (deja únicamente el contexto).
 - NO toques el diseño, estilos, HTML de presentación ni la estructura salvo que sea imprescindible.
 - NO inventes clases, NO separes el código a otros archivos, NO cambies referencias (<link>, <script src>).
 - Máximo 6 bloques, los más importantes. Solo devuelve vacío si el código ya está perfecto.
 - No escribas nada fuera de los bloques.
+""".strip()
+
+
+SYSTEM_PROMPT_COMPLETO = """
+Eres un ingeniero experto en calidad de código. Recibes un archivo con problemas y recomendaciones.
+DEBES devolver el ARCHIVO COMPLETO ya corregido, aplicando las recomendaciones.
+
+REGLAS OBLIGATORIAS (STRICTLY):
+- Devuelve el archivo ENTERO dentro de un ÚNICO bloque de código markdown (``` ... ```).
+- Corrige los errores de sintaxis, código basura, credenciales/inyección, validación y manejo de errores.
+- PRESERVA todo lo que ya funciona: nombres, estructura, diseño, comentarios útiles.
+- NO inventes clases ni funciones que no existan. NO separes el código en otros archivos.
+- NO cambies referencias externas (<link href>, <script src>, import) a archivos que no existan.
+- No escribas explicaciones fuera del bloque de código.
 """.strip()
 
 
@@ -189,6 +210,9 @@ def aplicar_parches(codigo, respuesta):
     Aplica los bloques @@BUSCAR@@/@@REEMPLAZAR@@. Primero intenta una coincidencia
     EXACTA; si falla, usa una coincidencia tolerante a la indentación. Permite
     también eliminar líneas (reemplazo vacío). El resto del archivo queda intacto.
+
+    Retorna el código nuevo (string). Si no coincidió ningún parche, devuelve el
+    código original sin cambios.
     """
     patron = re.compile(r"@@BUSCAR@@\r?\n(.*?)\r?\n@@REEMPLAZAR@@\r?\n?(.*?)@@FIN@@", re.DOTALL)
     nuevo = codigo
@@ -207,6 +231,14 @@ def aplicar_parches(codigo, respuesta):
     total = respuesta.count("@@BUSCAR@@")
     print(f"  Parches: el modelo devolvió {total}, se aplicaron {aplicados}.")
     return nuevo
+
+
+def _extraer_codigo_de_bloque(texto: str) -> str:
+    """Extrae el contenido de un bloque markdown ``` ... ```; si no hay, retorna el texto tal cual."""
+    m = re.search(r"```[a-zA-Z0-9_+-]*\r?\n(.*?)```", texto, re.DOTALL)
+    if m:
+        return m.group(1).rstrip("\n") + "\n"
+    return texto.strip()
 
 
 def obtener_cambios(ruta: str) -> str:
@@ -231,11 +263,54 @@ def obtener_cambios(ruta: str) -> str:
         return ""
 
 
+def _reescribir_completo(cliente, codigo, nombre_archivo, extension, recomendaciones):
+    """
+    Respaldo: pide al modelo el ARCHIVO COMPLETO corregido. Se usa solo cuando
+    los parches quirúrgicos no coincidieron. El orquestador valida la integridad
+    del resultado antes de aplicarlo, por lo que este respaldo es seguro.
+    """
+    mensaje = f"""
+Corrige y mejora el siguiente archivo aplicando las recomendaciones. Devuelve el ARCHIVO COMPLETO corregido.
+
+**Archivo:** {nombre_archivo}
+**Lenguaje:** {extension.upper() if extension else "desconocido"}
+
+**Recomendaciones a aplicar:**
+{recomendaciones}
+
+**Código actual:**
+```{extension}
+{codigo}
+```
+""".strip()
+    try:
+        respuesta = completar_con_reintentos(cliente,
+            model=MODELO_API,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_COMPLETO},
+                {"role": "user", "content": mensaje},
+            ],
+            temperature=TEMPERATURA,
+            max_tokens=MAX_TOKENS,
+            reasoning_effort=ESFUERZO,
+        )
+        contenido = (respuesta.choices[0].message.content or "").strip()
+        if not contenido:
+            return ""
+        nuevo = _extraer_codigo_de_bloque(contenido)
+        print("  Reescritura completa generada (se validará antes de aplicar).")
+        return nuevo
+    except Exception as e:
+        print(f"  [ERROR] Falló la reescritura completa de {nombre_archivo}: {e}")
+        return ""
+
+
 def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
                     extension: str, recomendaciones: str, cambios: str = "") -> str:
     """
     Envía el código y las recomendaciones al modelo y retorna el código corregido.
-    Si algo falla, retorna cadena vacía (no se modifica el archivo).
+    Estrategia: 1) parches quirúrgicos; 2) si ninguno coincide, reescritura completa.
+    Si todo falla, retorna cadena vacía (no se modifica el archivo).
     """
     bloque_recs = recomendaciones if recomendaciones else (
         "No hay recomendaciones específicas. Mejora la calidad general del código "
@@ -289,9 +364,14 @@ Devuelve únicamente los cambios en el formato de parches @@BUSCAR@@/@@REEMPLAZA
             max_tokens=MAX_TOKENS,
             reasoning_effort=ESFUERZO,
         )
-        contenido = respuesta.choices[0].message.content.strip()
-        # Aplicar solo los cambios puntuales (parches) que coincidan exactamente con el código.
-        return aplicar_parches(codigo, contenido)
+        contenido = (respuesta.choices[0].message.content or "").strip()
+        nuevo = aplicar_parches(codigo, contenido)
+        if nuevo != codigo:
+            return nuevo
+
+        # Respaldo: ningún parche coincidió → reescritura completa (validada por el orquestador).
+        print("  Ningún parche coincidió; intentando reescritura completa como respaldo.")
+        return _reescribir_completo(cliente, codigo, nombre_archivo, extension, bloque_recs)
 
     except Exception as e:
         print(f"  [ERROR] Falló la corrección de {nombre_archivo}: {e}")
@@ -317,7 +397,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"  CORRECTOR DE CÓDIGO CON IA — Pipeline CI/CD")
-    print(f"  Modelo: {MODELO_IA}")
+    print(f"  Modelo: {MODELO_API}")
     print(f"{'='*60}\n")
 
     archivos_corregidos = 0
