@@ -6,11 +6,10 @@ Módulo de corrección automática de código con IA para pipelines CI/CD.
 Toma el código y las recomendaciones del análisis previo (ai_code_analyzer.py)
 y usa el modelo de lenguaje para corregir el código aplicando las mejoras.
 
-Estrategia de corrección (en dos capas):
-  1) PARCHES QUIRÚRGICOS @@BUSCAR@@/@@REEMPLAZAR@@ (cambios mínimos y seguros).
-  2) Si ningún parche coincide, REESCRITURA COMPLETA del archivo (respaldo).
-     La reescritura la valida después el validador de integridad del orquestador
-     (ai_fix_iterativo.py), así nunca puede romper el proyecto.
+Estrategia de corrección: PARCHES QUIRÚRGICOS @@BUSCAR@@/@@REEMPLAZAR@@ enfocados
+SOLO en las líneas que cambiaron en el Pull Request. NUNCA se reescribe el archivo
+completo (eso podría romper el proyecto). Si el modelo no propone un parche que
+coincida, el archivo se deja intacto (es más seguro no tocarlo que dañarlo).
 
 Comando en el Pull Request: /fix-ia
 
@@ -125,20 +124,6 @@ REGLAS OBLIGATORIAS (STRICTLY):
 """.strip()
 
 
-SYSTEM_PROMPT_COMPLETO = """
-Eres un ingeniero experto en calidad de código. Recibes un archivo con problemas y recomendaciones.
-DEBES devolver el ARCHIVO COMPLETO ya corregido, aplicando las recomendaciones.
-
-REGLAS OBLIGATORIAS (STRICTLY):
-- Devuelve el archivo ENTERO dentro de un ÚNICO bloque de código markdown (``` ... ```).
-- Corrige los errores de sintaxis, código basura, credenciales/inyección, validación y manejo de errores.
-- PRESERVA todo lo que ya funciona: nombres, estructura, diseño, comentarios útiles.
-- NO inventes clases ni funciones que no existan. NO separes el código en otros archivos.
-- NO cambies referencias externas (<link href>, <script src>, import) a archivos que no existan.
-- No escribas explicaciones fuera del bloque de código.
-""".strip()
-
-
 def leer_archivo(ruta: str) -> tuple[str, str]:
     """Lee un archivo de código y retorna (contenido, extensión)."""
     path = Path(ruta)
@@ -233,14 +218,6 @@ def aplicar_parches(codigo, respuesta):
     return nuevo
 
 
-def _extraer_codigo_de_bloque(texto: str) -> str:
-    """Extrae el contenido de un bloque markdown ``` ... ```; si no hay, retorna el texto tal cual."""
-    m = re.search(r"```[a-zA-Z0-9_+-]*\r?\n(.*?)```", texto, re.DOTALL)
-    if m:
-        return m.group(1).rstrip("\n") + "\n"
-    return texto.strip()
-
-
 def obtener_cambios(ruta: str) -> str:
     """
     Obtiene solo las líneas nuevas o modificadas del archivo respecto a la rama
@@ -263,54 +240,12 @@ def obtener_cambios(ruta: str) -> str:
         return ""
 
 
-def _reescribir_completo(cliente, codigo, nombre_archivo, extension, recomendaciones):
-    """
-    Respaldo: pide al modelo el ARCHIVO COMPLETO corregido. Se usa solo cuando
-    los parches quirúrgicos no coincidieron. El orquestador valida la integridad
-    del resultado antes de aplicarlo, por lo que este respaldo es seguro.
-    """
-    mensaje = f"""
-Corrige y mejora el siguiente archivo aplicando las recomendaciones. Devuelve el ARCHIVO COMPLETO corregido.
-
-**Archivo:** {nombre_archivo}
-**Lenguaje:** {extension.upper() if extension else "desconocido"}
-
-**Recomendaciones a aplicar:**
-{recomendaciones}
-
-**Código actual:**
-```{extension}
-{codigo}
-```
-""".strip()
-    try:
-        respuesta = completar_con_reintentos(cliente,
-            model=MODELO_API,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_COMPLETO},
-                {"role": "user", "content": mensaje},
-            ],
-            temperature=TEMPERATURA,
-            max_tokens=MAX_TOKENS,
-            reasoning_effort=ESFUERZO,
-        )
-        contenido = (respuesta.choices[0].message.content or "").strip()
-        if not contenido:
-            return ""
-        nuevo = _extraer_codigo_de_bloque(contenido)
-        print("  Reescritura completa generada (se validará antes de aplicar).")
-        return nuevo
-    except Exception as e:
-        print(f"  [ERROR] Falló la reescritura completa de {nombre_archivo}: {e}")
-        return ""
-
-
 def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
                     extension: str, recomendaciones: str, cambios: str = "") -> str:
     """
     Envía el código y las recomendaciones al modelo y retorna el código corregido.
-    Estrategia: 1) parches quirúrgicos; 2) si ninguno coincide, reescritura completa.
-    Si todo falla, retorna cadena vacía (no se modifica el archivo).
+    Solo aplica parches quirúrgicos sobre las líneas cambiadas; NUNCA reescribe el
+    archivo completo. Si nada coincide, retorna el código sin cambios (seguro).
     """
     bloque_recs = recomendaciones if recomendaciones else (
         "No hay recomendaciones específicas. Mejora la calidad general del código "
@@ -365,13 +300,9 @@ Devuelve únicamente los cambios en el formato de parches @@BUSCAR@@/@@REEMPLAZA
             reasoning_effort=ESFUERZO,
         )
         contenido = (respuesta.choices[0].message.content or "").strip()
-        nuevo = aplicar_parches(codigo, contenido)
-        if nuevo != codigo:
-            return nuevo
-
-        # Respaldo: ningún parche coincidió → reescritura completa (validada por el orquestador).
-        print("  Ningún parche coincidió; intentando reescritura completa como respaldo.")
-        return _reescribir_completo(cliente, codigo, nombre_archivo, extension, bloque_recs)
+        # Solo se aplican los parches que coincidan con el codigo. NUNCA se
+        # reescribe el archivo completo: si nada coincide, se deja intacto.
+        return aplicar_parches(codigo, contenido)
 
     except Exception as e:
         print(f"  [ERROR] Falló la corrección de {nombre_archivo}: {e}")
