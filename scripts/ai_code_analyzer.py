@@ -43,6 +43,10 @@ TEMPERATURA = 0                           # Temperatura 0 = máxima consistencia
 # GLM 4.7 en Cerebras: contexto 131k, salida hasta 40k tokens. 9000 basta para el JSON del reporte.
 MAX_TOKENS = 9000
 
+# Descripción que el desarrollador escribió en el Pull Request (qué hizo / qué quiere).
+# La inyecta el workflow como variable de entorno PR_DESCRIPTION. Ayuda a la IA a enfocar el análisis.
+DESCRIPCION_PR = (os.environ.get("PR_DESCRIPTION") or "").strip()
+
 
 def completar_con_reintentos(cliente, intentos=4, espera=12, **kwargs):
     """
@@ -195,6 +199,14 @@ las siguientes lineas NUEVAS o MODIFICADAS. No reportes nada del codigo que no a
 ```
 """
 
+    bloque_descripcion = ""
+    if DESCRIPCION_PR:
+        bloque_descripcion = f"""
+
+DESCRIPCIÓN DEL DESARROLLADOR (qué hizo o qué quiere lograr con este cambio; tómala en cuenta al evaluar):
+{DESCRIPCION_PR}
+"""
+
     mensaje_usuario = f"""
 Analiza el siguiente archivo de código:
 
@@ -204,7 +216,7 @@ Analiza el siguiente archivo de código:
 ```{extension}
 {codigo}
 ```
-{bloque_enfoque}
+{bloque_enfoque}{bloque_descripcion}
 Proporciona el análisis completo en el formato JSON especificado.
 """.strip()
 

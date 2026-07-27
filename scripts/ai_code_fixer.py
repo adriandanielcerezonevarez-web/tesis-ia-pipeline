@@ -9,7 +9,7 @@ y usa el modelo de lenguaje para corregir el código aplicando las mejoras.
 Estrategia de corrección: PARCHES QUIRÚRGICOS @@BUSCAR@@/@@REEMPLAZAR@@ enfocados
 SOLO en las líneas que cambiaron en el Pull Request. NUNCA se reescribe el archivo
 completo (eso podría romper el proyecto). Si el modelo no propone un parche que
-coincida, el archivo se deja intacto (es más seguro no tocarlo que dañarlo).
+coincida con las líneas cambiadas, el archivo se deja intacto.
 
 Comando en el Pull Request: /fix-ia
 
@@ -51,6 +51,10 @@ TEMPERATURA = 0.1                         # Muy baja: correcciones conservadoras
 MAX_TOKENS = 16000 if ES_GLM else 15000
 # Caracteres máximos de código enviados en el prompt (el archivo completo cabe de sobra).
 MAX_CHARS_CODIGO = 100000
+
+# Descripción que el desarrollador escribió en el Pull Request (qué hizo / qué quiere mejorar).
+# La inyecta el workflow como variable de entorno PR_DESCRIPTION. Sirve para guiar a la IA.
+DESCRIPCION_PR = (os.environ.get("PR_DESCRIPTION") or "").strip()
 
 
 def completar_con_reintentos(cliente, intentos=4, espera=12, **kwargs):
@@ -111,6 +115,7 @@ contexto para que sea único e inconfundible dentro del archivo>
 REGLAS OBLIGATORIAS (STRICTLY):
 - El texto entre @@BUSCAR@@ y @@REEMPLAZAR@@ DEBE existir EXACTAMENTE en el código (misma
   indentación, mismas comillas, mismos espacios). Cópialo LITERAL; si no coincide, se descarta.
+- Toca ÚNICAMENTE las líneas nuevas o modificadas del Pull Request. NO modifiques nada fuera de esa zona.
 - Haz cambios MÍNIMOS enfocados en: ERRORES DE SINTAXIS, líneas basura o identificadores sin sentido,
   código muerto, seguridad (credenciales, inyección), validación de datos y manejo de errores.
 - APLICA SIEMPRE las recomendaciones que recibes. Si una recomendación pide eliminar una línea
@@ -190,11 +195,15 @@ def _reemplazo_tolerante(texto, buscar, reemplazar):
     return texto, False
 
 
-def aplicar_parches(codigo, respuesta):
+def aplicar_parches(codigo, respuesta, cambios_set=None):
     """
     Aplica los bloques @@BUSCAR@@/@@REEMPLAZAR@@. Primero intenta una coincidencia
     EXACTA; si falla, usa una coincidencia tolerante a la indentación. Permite
     también eliminar líneas (reemplazo vacío). El resto del archivo queda intacto.
+
+    Si se pasa `cambios_set` (conjunto de líneas cambiadas en el PR), SOLO se
+    aplican los parches que tocan al menos una de esas líneas: así la corrección
+    queda restringida a lo que cambió y no altera el resto del archivo.
 
     Retorna el código nuevo (string). Si no coincidió ningún parche, devuelve el
     código original sin cambios.
@@ -202,10 +211,17 @@ def aplicar_parches(codigo, respuesta):
     patron = re.compile(r"@@BUSCAR@@\r?\n(.*?)\r?\n@@REEMPLAZAR@@\r?\n?(.*?)@@FIN@@", re.DOTALL)
     nuevo = codigo
     aplicados = 0
+    omitidos_fuera = 0
     for buscar, reemplazar in patron.findall(respuesta):
         reemplazar = reemplazar.rstrip("\n")
         if not buscar.strip():
             continue
+        # Restringir a la zona cambiada: el parche debe tocar al menos una línea del diff.
+        if cambios_set:
+            lineas_buscar = {l.strip() for l in buscar.split("\n") if l.strip()}
+            if not (lineas_buscar & cambios_set):
+                omitidos_fuera += 1
+                continue
         if buscar in nuevo:
             nuevo = nuevo.replace(buscar, reemplazar, 1)
             aplicados += 1
@@ -214,7 +230,8 @@ def aplicar_parches(codigo, respuesta):
             if ok:
                 aplicados += 1
     total = respuesta.count("@@BUSCAR@@")
-    print(f"  Parches: el modelo devolvió {total}, se aplicaron {aplicados}.")
+    extra = f" ({omitidos_fuera} omitidos por caer fuera de las líneas cambiadas)" if omitidos_fuera else ""
+    print(f"  Parches: el modelo devolvió {total}, se aplicaron {aplicados}{extra}.")
     return nuevo
 
 
@@ -271,12 +288,19 @@ def corregir_con_ia(cliente, codigo: str, nombre_archivo: str,
 ```
 """
 
+    bloque_descripcion = ""
+    if DESCRIPCION_PR:
+        bloque_descripcion = f"""
+**El desarrollador describió su cambio así** (úsalo para entender la intención y corregir solo eso):
+{DESCRIPCION_PR}
+"""
+
     mensaje_usuario = f"""
 Corrige y mejora el siguiente archivo de código.
 
 **Archivo:** {nombre_archivo}
 **Lenguaje:** {extension.upper() if extension else "desconocido"}
-
+{bloque_descripcion}
 **Recomendaciones a aplicar:**
 {bloque_recs}
 {bloque_enfoque}
@@ -300,9 +324,10 @@ Devuelve únicamente los cambios en el formato de parches @@BUSCAR@@/@@REEMPLAZA
             reasoning_effort=ESFUERZO,
         )
         contenido = (respuesta.choices[0].message.content or "").strip()
-        # Solo se aplican los parches que coincidan con el codigo. NUNCA se
-        # reescribe el archivo completo: si nada coincide, se deja intacto.
-        return aplicar_parches(codigo, contenido)
+        # Solo se aplican los parches que coincidan con el código Y que toquen las
+        # líneas cambiadas del PR. NUNCA se reescribe el archivo completo.
+        cambios_set = {l.strip() for l in (cambios or "").split("\n") if l.strip()}
+        return aplicar_parches(codigo, contenido, cambios_set)
 
     except Exception as e:
         print(f"  [ERROR] Falló la corrección de {nombre_archivo}: {e}")
