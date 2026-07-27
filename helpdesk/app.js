@@ -35,6 +35,11 @@ function updateConnectionBadge(online) {
     : '<span style="color:#b76e00;font-size:11px">modo local</span>';
 }
 
+/**
+ * Inicializa la sesión de usuario verificando el almacenamiento.
+ * Redirige a login si no hay sesión activa.
+ * @returns {boolean} True si la sesión es válida, false en caso contrario.
+ */
 function initAuth() {
   const s = sessionStorage.getItem(SESSION_KEY);
   if (!s) {
@@ -43,7 +48,14 @@ function initAuth() {
     }
     return false;
   }
-  session = JSON.parse(s);
+  try {
+    session = JSON.parse(s);
+  } catch (e) {
+    console.error('Error parseando sesión', e);
+    sessionStorage.removeItem(SESSION_KEY);
+    window.location.href = 'login.html';
+    return false;
+  }
   document.body.classList.add(`role-${session.role}`);
 
   const nameEl = document.getElementById('userDisplayName');
@@ -72,7 +84,8 @@ function dbLoad() {
   catch { return []; }
 }
 function dbSave(ticketsArr) {
-  localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
+  try { localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr)); }
+  catch (err) { console.error('Error guardando en local:', err); showToast('Error guardando datos localmente', 'error'); }
 }
 function dbNextId() {
   const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
@@ -85,7 +98,8 @@ function usersLoad() {
   catch { return []; }
 }
 function usersSave(usersArr) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
+  try { localStorage.setItem(USERS_KEY, JSON.stringify(usersArr)); }
+  catch (err) { console.error('Error guardando usuarios:', err); showToast('Error guardando usuarios', 'error'); }
 }
 
 // contador atómico en firestore para que dos clientes no choquen
@@ -553,8 +567,9 @@ function resetForm() {
   trySet('pageSubtitle', 'Crear un nuevo ticket de soporte');
 }
 
-
-
+function editTicket(id) {
+  const t = tickets.find(x => x.id === id);
+  if (!t) return;
   if (session.role === 'user' && t.requesterId !== session.userId) {
     showToast('Acceso denegado', 'error'); return;
   }
@@ -581,12 +596,23 @@ function resetForm() {
   showSection('create');
 }
 
+/**
+ * Guarda un ticket nuevo o actualiza uno existente.
+ * Maneja la persistencia en Firebase o LocalStorage según la configuración.
+ * @param {Event} e - Evento del formulario.
+ */
 async function saveTicket(e) {
   e.preventDefault();
   const title = document.getElementById('ticketTitle').value.trim();
   const category = document.getElementById('ticketCategory').value;
   const priority = document.getElementById('ticketPriority').value;
   const description = document.getElementById('ticketDescription').value.trim();
+
+  // Validación básica de campos obligatorios
+  if (!title || !category || !priority || !description) {
+    showToast('Por favor completa los campos obligatorios.', 'error');
+    return;
+  }
 
   let status = document.getElementById('ticketStatus')?.value || 'Abierto';
   let assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
@@ -739,9 +765,27 @@ function renderReports() {
 }
 
 
+/**
+ * Exporta los tickets y usuarios a un archivo JSON.
+ * Valida la estructura de datos antes de generar el archivo.
+ * @throws {Error} Si los datos no son arreglos válidos o falla la descarga.
+ */
 function exportJSON() {
-  cons data = JSON.stringify({ tickets, users }, null, 2);
-  downloadFile('helpdesk_backup.json', data, 'application/json');
+  try {
+    if (!Array.isArray(tickets)) {
+      throw new Error('Los datos de tickets no son válidos.');
+    }
+    // Se excluyen usuarios para evitar exponer información sensible (contraseñas) en la exportación
+    const data = JSON.stringify({ tickets }, null, 2);
+    if (typeof downloadFile !== 'function') {
+      throw new Error('Función de descarga no disponible.');
+    }
+    downloadFile('helpdesk_backup.json', data, 'application/json');
+    showToast('Datos exportados correctamente', 'success');
+  } catch (err) {
+    console.error('exportJSON error:', err);
+    showToast('Error al exportar JSON: ' + err.message, 'error');
+  }
 }
 
 
@@ -882,6 +926,16 @@ async function saveUser(e) {
   const email = document.getElementById('userEmailField').value.trim();
   const password = document.getElementById('userPassword').value;
   const role = document.getElementById('userRole').value;
+
+  // Validación estricta de inputs
+  if (!username || !name || !email || !role) {
+    showToast('Todos los campos son obligatorios.', 'error');
+    return;
+  }
+  if (!id && !password) {
+    showToast('La contraseña es obligatoria para nuevos usuarios.', 'error');
+    return;
+  }
 
   if (useFirebase) {
     try {
