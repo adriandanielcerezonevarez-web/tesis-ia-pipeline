@@ -93,6 +93,8 @@ jobs:
         env:
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          # Descripción del PR (segura como env; la IA la usa para enfocar el análisis).
+          PR_DESCRIPTION: ${{ github.event.pull_request.body }}
         run: |
           ARCHIVOS="${{ steps.archivos-modificados.outputs.lista_archivos }}"
           echo "Analizando: $ARCHIVOS"
