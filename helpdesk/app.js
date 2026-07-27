@@ -741,7 +741,7 @@ function renderReports() {
 
 
 function exportJSON() {
-  cons data = JSON.stringify({ tickets, users }, null, 2);
+  const data = SON.stringify({ tickets, users }, null, 2);
   downloadFile('helpdesk_backup.json', data, 'application/json');
 }
 
