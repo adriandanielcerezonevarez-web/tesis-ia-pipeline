@@ -1,6 +1,5 @@
 // claves de sesión y almacenamiento
 const SESSION_KEY = 'helpdesk_session';
-const USERS_KEY = 'helpdesk_users';
 const DB_KEY = 'helpdesk_tickets';
 const COUNTER_KEY = 'helpdesk_counter';
 
@@ -9,12 +8,71 @@ let session = null;
 // firebase (puede acabar null si no hay config)
 let db = null;
 let useFirebase = false;
-let unsubscribeTickets = null; // para cortar el listener al cerrar sesión
+let unsubscribeTickets = null;
+
+// Configuración centralizada
+const APP_CONFIG = {
+  TECHNICIANS: ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'],
+  ROLES: { ADMIN: 'admin', USER: 'user' }
+};
+
+// Helper de autorización
+function checkPermission(requiredRole) {
+  if (!session) return false;
+  if (requiredRole === APP_CONFIG.ROLES.ADMIN) return session.role === APP_CONFIG.ROLES.ADMIN;
+  return true;
+}
+
+// Patrón Repository para acceso a datos
+const DataService = {
+  async getTickets() {
+    if (useFirebase) {
+      const snap = await db.collection('tickets').orderBy('createdAt', 'desc').get();
+      return snap.docs.map(d => d.data());
+    }
+    return dbLoad();
+  },
+  async saveTicket(ticket) {
+    if (useFirebase) {
+      const id = ticket.id || await fbNextId();
+      const data = { ...ticket, id, updatedAt: new Date().toISOString() };
+      if (!ticket.createdAt) data.createdAt = data.updatedAt;
+      await db.collection('tickets').doc(id).set(data);
+      return id;
+    } else {
+      if (ticket.id) {
+        const idx = tickets.findIndex(t => t.id === ticket.id);
+        if (idx !== -1) {
+          tickets[idx] = { ...tickets[idx], ...ticket, updatedAt: new Date().toISOString() };
+        }
+      } else {
+        const newId = dbNextId();
+        const newTicket = { ...ticket, id: newId, createdAt: new Date().toISOString() };
+        tickets.unshift(newTicket);
+      }
+      dbSave(tickets);
+      return ticket.id || dbNextId(); // Aproximación para local sync
+    }
+  },
+  async deleteTicket(id) {
+    if (useFirebase) await db.collection('tickets').doc(id).delete();
+    else {
+      tickets = tickets.filter(t => t.id !== id);
+      dbSave(tickets);
+    }
+  },
+  async getUsers() {
+    if (useFirebase) {
+      const snap = await db.collection('users').get();
+      return snap.docs.map(d => d.data());
+    }
+    return usersLoad();
+  }
+};
 
 function initFirebase() {
   if (typeof FIREBASE_CONFIGURED === 'undefined' || !FIREBASE_CONFIGURED) return;
   try {
-    // login.html ya pudo haber inicializado firebase
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     db = firebase.firestore();
     useFirebase = true;
@@ -81,12 +139,13 @@ function dbNextId() {
   return `TK-${String(next).padStart(4, '0')}`;
 }
 function usersLoad() {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY)) || []; }
+  try { return JSON.parse(localStorage.getItem('helpdesk_users')) || []; }
   catch { return []; }
 }
 function usersSave(usersArr) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
+  localStorage.setItem('helpdesk_users', JSON.stringify(usersArr));
 }
+
 
 // contador atómico en firestore para que dos clientes no choquen
 async function fbNextId() {
@@ -160,7 +219,7 @@ if (window.location.pathname.endsWith('login.html')) {
         useFirebase = false;
         tickets = dbLoad();
         users = usersLoad();
-        seedDemoData();
+        await seedDemoData();
       }
     } else {
       updateConnectionBadge(false);
@@ -237,7 +296,7 @@ const SECTION_META = {
 
 function showSection(name) {
   // los usuarios normales no entran a las pantallas de admin
-  if (session.role === 'user' && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
+  if (!checkPermission(APP_CONFIG.ROLES.ADMIN) && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
 
   currentSection = name;
 
@@ -302,40 +361,54 @@ function updateNavBadge() {
 }
 
 // dashboard (admin)
-function renderDashboard() {
-  if (session.role !== 'admin') return;
-  const total = tickets.length;
-  const open = tickets.filter(t => t.status === 'Abierto').length;
-  const progress = tickets.filter(t => t.status === 'En Progreso').length;
-  const closed = tickets.filter(t => t.status === 'Resuelto' || t.status === 'Cerrado').length;
-
-  trySet('stat-total', total);
-  trySet('stat-open', open);
-  trySet('stat-progress', progress);
-  trySet('stat-closed', closed);
+/**
+ * Función pura para calcular métricas del dashboard.
+ * @param {Array} ticketList - Lista de tickets.
+ * @returns {Object} Métricas calculadas.
+ */
+function calculateDashboardMetrics(ticketList) {
+  const total = ticketList.length;
+  const open = ticketList.filter(t => t.status === 'Abierto').length;
+  const progress = ticketList.filter(t => t.status === 'En Progreso').length;
+  const closed = ticketList.filter(t => t.status === 'Resuelto' || t.status === 'Cerrado').length;
 
   const pc = { 'Crítica': 0, 'Alta': 0, 'Media': 0, 'Baja': 0 };
-  tickets.forEach(t => { if (pc[t.priority] !== undefined) pc[t.priority]++; });
+  ticketList.forEach(t => { if (pc[t.priority] !== undefined) pc[t.priority]++; });
   const maxP = Math.max(...Object.values(pc), 1);
 
-  tryWidth('bar-critica', `${(pc['Crítica'] / maxP) * 100}%`); trySet('count-critica', pc['Crítica']);
-  tryWidth('bar-alta', `${(pc['Alta'] / maxP) * 100}%`); trySet('count-alta', pc['Alta']);
-  tryWidth('bar-media', `${(pc['Media'] / maxP) * 100}%`); trySet('count-media', pc['Media']);
-  tryWidth('bar-baja', `${(pc['Baja'] / maxP) * 100}%`); trySet('count-baja', pc['Baja']);
-
   const catCounts = {};
-  tickets.forEach(t => { catCounts[t.category] = (catCounts[t.category] || 0) + 1; });
+  ticketList.forEach(t => { catCounts[t.category] = (catCounts[t.category] || 0) + 1; });
+  
+  const recent = [...ticketList].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
+
+  return { total, open, progress, closed, pc, maxP, catCounts, recent };
+}
+
+function renderDashboard() {
+  if (!checkPermission(APP_CONFIG.ROLES.ADMIN)) return;
+  
+  const metrics = calculateDashboardMetrics(tickets);
+
+  trySet('stat-total', metrics.total);
+  trySet('stat-open', metrics.open);
+  trySet('stat-progress', metrics.progress);
+  trySet('stat-closed', metrics.closed);
+
+  tryWidth('bar-critica', `${(metrics.pc['Crítica'] / metrics.maxP) * 100}%`); trySet('count-critica', metrics.pc['Crítica']);
+  tryWidth('bar-alta', `${(metrics.pc['Alta'] / metrics.maxP) * 100}%`); trySet('count-alta', metrics.pc['Alta']);
+  tryWidth('bar-media', `${(metrics.pc['Media'] / metrics.maxP) * 100}%`); trySet('count-media', metrics.pc['Media']);
+  tryWidth('bar-baja', `${(metrics.pc['Baja'] / metrics.maxP) * 100}%`); trySet('count-baja', metrics.pc['Baja']);
+
   const catEl = document.getElementById('categoryStats');
   if (catEl) {
-    const s = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+    const s = Object.entries(metrics.catCounts).sort((a, b) => b[1] - a[1]);
     catEl.innerHTML = s.length ? s.map(([c, n]) => `<div class="category-stat-item"><span class="category-stat-name">${c}</span><span class="category-stat-count">${n}</span></div>`).join('')
       : '<div class="empty-state-small">Sin datos</div>';
   }
 
-  const recent = [...tickets].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
   const recEl = document.getElementById('recentTicketsList');
   if (recEl) {
-    recEl.innerHTML = recent.length ? recent.map(t => `<div class="recent-ticket-item" onclick="openTicketModal('${t.id}')"><span class="recent-ticket-id">${t.id}</span><span class="recent-ticket-title">${escHtml(t.title)}</span><span class="recent-ticket-meta">${statusBadgeHtml(t.status)}</span></div>`).join('')
+    recEl.innerHTML = metrics.recent.length ? metrics.recent.map(t => `<div class="recent-ticket-item" onclick="openTicketModal('${t.id}')"><span class="recent-ticket-id">${t.id}</span><span class="recent-ticket-title">${escHtml(t.title)}</span><span class="recent-ticket-meta">${statusBadgeHtml(t.status)}</span></div>`).join('')
       : '<div class="empty-state-small">No hay tickets</div>';
   }
 }
@@ -518,7 +591,6 @@ function openTicketModal(id) {
 
   if (delBtn) {
     delBtn.onclick = () => { closeTicketModal(); confirmDelete(id); };
-
   }
 
   openModal('ticketModal');
@@ -553,8 +625,9 @@ function resetForm() {
   trySet('pageSubtitle', 'Crear un nuevo ticket de soporte');
 }
 
-
-
+function editTicket(id) {
+  const t = tickets.find(x => x.id === id);
+  if (!t) return;
   if (session.role === 'user' && t.requesterId !== session.userId) {
     showToast('Acceso denegado', 'error'); return;
   }
@@ -581,63 +654,60 @@ function resetForm() {
   showSection('create');
 }
 
+/**
+ * Guarda o actualiza un ticket validando los datos y usando el servicio de datos.
+ * @param {Event} e - Evento del formulario.
+ */
 async function saveTicket(e) {
   e.preventDefault();
+  
+  // Recolección y saneo de datos
   const title = document.getElementById('ticketTitle').value.trim();
   const category = document.getElementById('ticketCategory').value;
   const priority = document.getElementById('ticketPriority').value;
   const description = document.getElementById('ticketDescription').value.trim();
+  const status = document.getElementById('ticketStatus')?.value || 'Abierto';
+  const assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
+  const requester = document.getElementById('ticketRequester')?.value.trim() || session.name;
+  const email = document.getElementById('ticketEmail')?.value.trim() || '';
+  const notes = document.getElementById('ticketNotes')?.value.trim() || '';
+  const requesterId = session.role === 'admin' ? null : session.userId;
 
-  let status = document.getElementById('ticketStatus')?.value || 'Abierto';
-  let assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
-  let requester = document.getElementById('ticketRequester')?.value.trim() || session.name;
-  let email = document.getElementById('ticketEmail')?.value.trim() || '';
-  let notes = document.getElementById('ticketNotes')?.value.trim() || '';
-  let requesterId = session.role === 'admin' ? null : session.userId;
-
-  if (useFirebase) {
-    try {
-      if (editingId) {
-        const updateData = session.role === 'admin'
-          ? { title, category, priority, status, assigned, requester, email, description, notes, updatedAt: new Date().toISOString() }
-          : { title, category, priority, description, updatedAt: new Date().toISOString() };
-        await db.collection('tickets').doc(editingId).update(updateData);
-        showToast('Ticket actualizado', 'success');
-      } else {
-        const id = await fbNextId();
-        const newTicket = { id, title, category, priority, status, assigned, requester, requesterId, email, description, notes, createdAt: new Date().toISOString() };
-        await db.collection('tickets').doc(id).set(newTicket);
-        showToast(`Ticket ${id} creado`, 'success');
-      }
-    } catch (err) {
-      console.error('saveTicket Firebase error:', err);
-      showToast('Error al guardar ticket: ' + err.message, 'error');
-      return;
-    }
-  } else {
-    if (editingId) {
-      const idx = tickets.findIndex(t => t.id === editingId);
-      if (idx !== -1) {
-        if (session.role === 'admin') {
-          tickets[idx] = { ...tickets[idx], title, category, priority, status, assigned, requester, email, description, notes, updatedAt: new Date().toISOString() };
-        } else {
-          tickets[idx] = { ...tickets[idx], title, category, priority, description, updatedAt: new Date().toISOString() };
-        }
-        dbSave(tickets);
-        showToast('Ticket actualizado', 'success');
-      }
-    } else {
-      const newTicket = { id: dbNextId(), title, category, priority, status, assigned, requester, requesterId, email, description, notes, createdAt: new Date().toISOString() };
-      tickets.unshift(newTicket);
-      dbSave(tickets);
-      showToast(`Ticket ${newTicket.id} creado`, 'success');
-    }
-    renderAll();
+  // Validación de esquema
+  if (!title || !category || !priority || !description) {
+    showToast('Por favor completa los campos obligatorios.', 'error');
+    return;
   }
 
-  editingId = null;
-  if (!useFirebase) showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
-  else showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
+  try {
+    const ticketData = { title, category, priority, description, status, assigned, requester, requesterId, email, notes };
+    
+    if (editingId) {
+      // Lógica de actualización según rol
+      if (checkPermission(APP_CONFIG.ROLES.ADMIN)) {
+        await DataService.saveTicket({ id: editingId, ...ticketData });
+      } else {
+        await DataService.saveTicket({ id: editingId, title, category, priority, description });
+      }
+      showToast('Ticket actualizado', 'success');
+    } else {
+      const newId = await DataService.saveTicket(ticketData);
+      showToast(`Ticket ${newId} creado`, 'success');
+    }
+
+    // Recargar datos si estamos en modo local para asegurar sincronización
+    if (!useFirebase) {
+      tickets = dbLoad();
+      renderAll();
+    }
+    
+    editingId = null;
+    showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
+
+  } catch (err) {
+    console.error('saveTicket error:', err);
+    showToast('Error al guardar ticket: ' + err.message, 'error');
+  }
 }
 
 function cancelForm() {
@@ -649,10 +719,8 @@ function cancelForm() {
 
 
 // ── Asignación rápida de técnico (botón en cada ticket) ──
-const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'];
-
 function asignarTecnico(id) {
-  if (session.role !== 'admin') { showToast('Acceso denegado', 'error'); return; }
+  if (!checkPermission(APP_CONFIG.ROLES.ADMIN)) { showToast('Acceso denegado', 'error'); return; }
   cerrarMenuAsignar();
   const overlay = document.createElement('div');
   overlay.id = 'asignarOverlay';
@@ -661,7 +729,7 @@ function asignarTecnico(id) {
   const box = document.createElement('div');
   box.style.cssText = 'background:#fff;border-radius:6px;padding:18px 20px;min-width:280px;box-shadow:0 4px 18px rgba(0,0,0,.22);';
   box.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;">Asignar técnico al ticket ' + id + '</h3>' +
-    TECNICOS.map(tec => '<button class="btn btn-ghost btn-sm" style="display:block;width:100%;text-align:left;margin-bottom:6px;" onclick="asignarTecnicoA(\'' + id + '\',\'' + tec + '\')">' + tec + '</button>').join('') +
+    APP_CONFIG.TECHNICIANS.map(tec => '<button class="btn btn-ghost btn-sm" style="display:block;width:100%;text-align:left;margin-bottom:6px;" onclick="asignarTecnicoA(\'' + id + '\',\'' + tec + '\')">' + tec + '</button>').join('') +
     '<button class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--text-muted);" onclick="cerrarMenuAsignar()">Cancelar</button>';
   overlay.appendChild(box);
   document.body.appendChild(overlay);
@@ -674,22 +742,14 @@ function cerrarMenuAsignar() {
 
 async function asignarTecnicoA(id, tecnico) {
   cerrarMenuAsignar();
-  if (session.role !== 'admin') return;
-  if (useFirebase) {
-    try {
-      await db.collection('tickets').doc(id).update({ assigned: tecnico, updatedAt: new Date().toISOString() });
-      showToast('Ticket ' + id + ' asignado a ' + tecnico, 'success');
-    } catch (err) {
-      showToast('Error al asignar: ' + err.message, 'error');
-    }
-  } else {
-    const idx = tickets.findIndex(t => t.id === id);
-    if (idx !== -1) {
-      tickets[idx] = { ...tickets[idx], assigned: tecnico, updatedAt: new Date().toISOString() };
-      dbSave(tickets);
-      showToast('Ticket ' + id + ' asignado a ' + tecnico, 'success');
-      renderAll();
-    }
+  if (!checkPermission(APP_CONFIG.ROLES.ADMIN)) return;
+  
+  try {
+    await DataService.saveTicket({ id, assigned: tecnico });
+    showToast('Ticket ' + id + ' asignado a ' + tecnico, 'success');
+    if (!useFirebase) renderAll();
+  } catch (err) {
+    showToast('Error al asignar: ' + err.message, 'error');
   }
 }
 
@@ -739,10 +799,7 @@ function renderReports() {
 }
 
 
-function exportJSON() {
-  const data = JSON.stringify({ tickets, users }, null, 2);
-  downloadFile('helpdesk_backup.json', data, 'application/json');
-}
+
 
 
 // Lista de campos exportables (configurable)
@@ -839,6 +896,7 @@ function renderUsersList() {
   if (session.role !== 'admin') return;
   const tbody = document.getElementById('usersTableBody');
   if (!tbody) return;
+  if (!Array.isArray(users)) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;">Error: Datos de usuarios corruptos</td></tr>'; return; }
   tbody.innerHTML = users.map(u => `
     <tr>
       <td style="font-weight:600">${escHtml(u.username)}</td>
@@ -855,23 +913,16 @@ function renderUsersList() {
 }
 function openUserModal() {
   tryVal('userEditId', ''); tryVal('userUsername', ''); tryVal('userName', '');
-  tryVal('userEmailField', ''); tryVal('userPassword', ''); tryVal('userRole', 'user');
+  tryVal('userEmailField', ''); tryVal('userRole', 'user');
   trySet('userModalTitle', 'Nuevo Usuario');
-  const hint = document.getElementById('pwdHint'); if (hint) hint.style.display = 'none';
-  const req = document.getElementById('pwdReq'); if (req) req.style.display = 'inline';
-  document.getElementById('userPassword').required = true;
   openModal('userModal');
 }
 function editUser(id) {
   const u = users.find(x => x.id === id); if (!u) return;
   tryVal('userEditId', u.id); tryVal('userUsername', u.username);
   tryVal('userName', u.name); tryVal('userEmailField', u.email || '');
-  tryVal('userRole', u.role); tryVal('userPassword', '');
+  tryVal('userRole', u.role);
   trySet('userModalTitle', 'Editar Usuario');
-
-  const hint = document.getElementById('pwdHint'); if (hint) hint.style.display = 'block';
-  const req = document.getElementById('pwdReq'); if (req) req.style.display = 'none';
-  document.getElementById('userPassword').required = false;
   openModal('userModal');
 }
 async function saveUser(e) {
@@ -891,17 +942,14 @@ async function saveUser(e) {
           showToast('El admin principal no puede cambiar de rol', 'error'); return;
         }
         const updateData = { username, name, email, role };
-        if (password) updateData.password = password;
         await db.collection('users').doc(id).update(updateData);
-        // mantén el array en memoria sincronizado
         const idx = users.findIndex(x => x.id === id);
         if (idx !== -1) { users[idx] = { ...users[idx], ...updateData }; }
         showToast('Usuario actualizado', 'success');
       } else {
-        // que no haya otro con el mismo username
         const snap = await db.collection('users').where('username', '==', username.toLowerCase()).get();
         if (!snap.empty) { showToast('Nombre de usuario en uso', 'error'); return; }
-        const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
+        const newUser = { id: `u${Date.now()}`, username, name, email, role, createdAt: new Date().toISOString() };
         await db.collection('users').doc(newUser.id).set(newUser);
         users.push(newUser);
         showToast('Usuario creado', 'success');
@@ -918,7 +966,6 @@ async function saveUser(e) {
           showToast('El admin principal no puede cambiar de rol', 'error'); return;
         }
         users[idx] = { ...users[idx], username, name, email, role };
-        if (password) users[idx].password = password;
         usersSave(users);
         showToast('Usuario actualizado', 'success');
       }
@@ -926,7 +973,7 @@ async function saveUser(e) {
       if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
         showToast('Nombre de usuario en uso', 'error'); return;
       }
-      const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
+      const newUser = { id: `u${Date.now()}`, username, name, email, role, createdAt: new Date().toISOString() };
       users.push(newUser);
       usersSave(users);
       showToast('Usuario creado', 'success');
@@ -970,7 +1017,8 @@ function closeTicketModal() { closeModalById('ticketModal'); }
 function closeConfirmModal(e) {
   if (e && e.target !== e.currentTarget) return;
   closeModalById('confirmModal'); pendingDeleteId = null;
-  if (document.getElementById('confirmDeleteBtn')) document.getElementById('confirmDeleteBtn').onclick = executeDelete;
+  const btn = document.getElementById('confirmDeleteBtn');
+  if (btn) btn.onclick = executeDelete;
 }
 function closeModalById(id) {
   const el = document.getElementById(id);
@@ -1003,7 +1051,8 @@ function priorityBadgeHtml(pr) {
   return `<span class="badge ${map[pr] || ''}">${pr}</span>`;
 }
 function categoryEmoji(c) {
-  return '';
+  const map = { 'Hardware': '💻', 'Software': '📀', 'Redes': '🌐', 'Impresoras': '🖨️', 'Otros': '📝' };
+  return map[c] || '📝';
 }
 function formatDate(iso) {
   if (!iso) return '—';
