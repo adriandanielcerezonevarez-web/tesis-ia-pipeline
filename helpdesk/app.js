@@ -737,7 +737,7 @@ function renderReports() {
     ['Sin asignar', total - assigned], ['Tasa resolución', total ? `${Math.round(((resolved + closed) / total) * 100)}%` : '—'],
   ].map(([l, v]) => `<div class="report-item"><span class="report-item-label">${l}</span><span class="report-item-value">${v}</span></div>`).join('');
 }
-
+EXPORT JSON 
 
 
 
