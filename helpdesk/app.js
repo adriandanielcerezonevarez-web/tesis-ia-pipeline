@@ -760,6 +760,19 @@ function exportJSON() {
     showToast('Error al exportar JSON: ' + err.message, 'error');
   }
 }
+function exportCSV() {
+  try {
+    if (!Array.isArray(tickets)) throw new Error('No hay tickets para exportar');
+    const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
+    const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
+      .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    const csv = [headers.join(','), ...rows].join('\r\n');
+    downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  } catch (err) {
+    console.error('exportCSV error:', err);
+    showToast('Error al exportar CSV: ' + err.message, 'error');
+  }
+}
 
 function downloadFile(fname, content, type) {
   const blob = new Blob([content], { type });
