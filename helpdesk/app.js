@@ -740,11 +740,6 @@ function renderReports() {
 
 
 
-function exportJSON() {
-  const data = SON.stringify({ tickets, users }, null, 2);
-  downloadFile('helpdesk_backup.json', data, 'application/json');
-}
-
 
 // Lista de campos exportables (configurable)
 const CSV_FIELDS = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
