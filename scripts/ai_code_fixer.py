@@ -176,19 +176,30 @@ def cargar_recomendaciones(ruta_reporte: str) -> dict:
     return recomendaciones_por_archivo
 
 
+def _norm(s: str) -> str:
+    """
+    Normaliza una línea para comparar: quita TODOS los espacios. Así el emparejado
+    y el filtro toleran reformateos del modelo (p. ej. `{ tickets, users }` vs
+    `{tickets,users}`, o indentación distinta), que son la causa más común de que
+    un parche válido no se aplique.
+    """
+    return re.sub(r"\s+", "", s)
+
+
 def _reemplazo_tolerante(texto, buscar, reemplazar):
     """
-    Reemplaza un bloque comparando línea por línea SIN tener en cuenta la
-    indentación (espacios al inicio/fin). Sirve cuando el modelo copia el
-    fragmento con espacios ligeramente distintos y el match exacto falla.
+    Reemplaza un bloque comparando línea por línea de forma tolerante: ignora la
+    indentación Y los espacios internos (normaliza espacios). Sirve cuando el
+    modelo copia el fragmento con espaciado ligeramente distinto y el match
+    exacto falla (por ejemplo `{ a, b }` vs `{a,b}`).
     """
     lineas = texto.split("\n")
-    objetivo = [l.strip() for l in buscar.split("\n")]
+    objetivo = [_norm(l) for l in buscar.split("\n")]
     n = len(objetivo)
     if n == 0:
         return texto, False
     for i in range(len(lineas) - n + 1):
-        if [l.strip() for l in lineas[i:i + n]] == objetivo:
+        if [_norm(l) for l in lineas[i:i + n]] == objetivo:
             reemplazo_lineas = reemplazar.split("\n") if reemplazar != "" else [""]
             lineas[i:i + n] = reemplazo_lineas
             return "\n".join(lineas), True
@@ -212,14 +223,16 @@ def aplicar_parches(codigo, respuesta, cambios_set=None):
     nuevo = codigo
     aplicados = 0
     omitidos_fuera = 0
+    cambios_norm = {_norm(c) for c in cambios_set} if cambios_set else None
     for buscar, reemplazar in patron.findall(respuesta):
         reemplazar = reemplazar.rstrip("\n")
         if not buscar.strip():
             continue
-        # Restringir a la zona cambiada: el parche debe tocar al menos una línea del diff.
-        if cambios_set:
-            lineas_buscar = {l.strip() for l in buscar.split("\n") if l.strip()}
-            if not (lineas_buscar & cambios_set):
+        # Restringir a la zona cambiada: el parche debe tocar al menos una línea del diff
+        # (comparación tolerante a espacios, igual que el emparejado).
+        if cambios_norm:
+            lineas_buscar = {_norm(l) for l in buscar.split("\n") if l.strip()}
+            if not (lineas_buscar & cambios_norm):
                 omitidos_fuera += 1
                 continue
         if buscar in nuevo:
