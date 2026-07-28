@@ -35,11 +35,6 @@ function updateConnectionBadge(online) {
     : '<span style="color:#b76e00;font-size:11px">modo local</span>';
 }
 
-/**
- * Inicializa la sesión de usuario verificando el almacenamiento.
- * Redirige a login si no hay sesión activa.
- * @returns {boolean} True si la sesión es válida, false en caso contrario.
- */
 function initAuth() {
   const s = sessionStorage.getItem(SESSION_KEY);
   if (!s) {
@@ -51,7 +46,7 @@ function initAuth() {
   try {
     session = JSON.parse(s);
   } catch (e) {
-    console.error('Error parseando sesión', e);
+    console.error('Sesión corrupta, cerrando sesión:', e);
     sessionStorage.removeItem(SESSION_KEY);
     window.location.href = 'login.html';
     return false;
@@ -73,6 +68,7 @@ function initAuth() {
 
 function logout() {
   if (unsubscribeTickets) unsubscribeTickets();
+  try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (_) {}
   sessionStorage.removeItem(SESSION_KEY);
   window.location.href = 'login.html';
 }
@@ -84,7 +80,7 @@ function dbLoad() {
 }
 function dbSave(ticketsArr) {
   try { localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr)); }
-  catch (err) { console.error('Error guardando en local:', err); showToast('Error guardando datos localmente', 'error'); }
+  catch (err) { console.error('Error guardando tickets en local:', err); showToast('Error guardando datos localmente', 'error'); }
 }
 function dbNextId() {
   const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
@@ -98,7 +94,7 @@ function usersLoad() {
 }
 function usersSave(usersArr) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(usersArr)); }
-  catch (err) { console.error('Error guardando usuarios:', err); showToast('Error guardando usuarios', 'error'); }
+  catch (err) { console.error('Error guardando usuarios en local:', err); showToast('Error guardando usuarios', 'error'); }
 }
 
 // contador atómico en firestore para que dos clientes no choquen
@@ -133,32 +129,21 @@ if (window.location.pathname.endsWith('login.html')) {
 
     initFirebase();
 
+    // Guard de seguridad: si hay Firebase pero no hay sesión autenticada, volver al login.
+    if (useFirebase && firebase.auth) {
+      if (!firebase.auth().currentUser) {
+        await new Promise(res => { const off = firebase.auth().onAuthStateChanged(() => { off(); res(); }); });
+      }
+      if (!firebase.auth().currentUser) { logout(); return; }
+    }
+
     if (useFirebase) {
       try {
         users = await fbLoadUsers();
         updateConnectionBadge(true);
 
-        // si la colección está vacía o todavía tiene los usuarios viejos, los pisamos
-        // FIXME: esto se debería quitar cuando la BD esté estable
-        let needsUpdate = users.length === 0;
-        users.forEach(data => {
-          if (data.id === 'u3' && (data.username !== 'adrian' || data.password !== 'user123')) needsUpdate = true;
-          if (data.id === 'u4' && (data.username !== 'allison' || data.password !== 'user456')) needsUpdate = true;
-          if (data.id === 'u2' && (data.username !== 'profesor' || data.password !== 'profesor123')) needsUpdate = true;
-        });
-
-        if (needsUpdate) {
-          const defaults = [
-            { id: 'u1', username: 'admin', password: 'admin123', name: 'Administrador Principal', role: 'admin', email: 'admin@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u2', username: 'profesor', password: 'profesor123', name: 'Profesor', role: 'admin', email: 'profesor@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u3', username: 'adrian', password: 'user123', name: 'Adrian', role: 'user', email: 'adrian@empresa.com', createdAt: new Date().toISOString() },
-            { id: 'u4', username: 'allison', password: 'user456', name: 'Allison', role: 'user', email: 'allison@empresa.com', createdAt: new Date().toISOString() },
-          ];
-          const batch = db.batch();
-          defaults.forEach(u => batch.set(db.collection('users').doc(u.id), u));
-          await batch.commit();
-          users = defaults;
-        }
+        // Los usuarios y sus contraseñas los gestiona Firebase Authentication.
+        // Aquí solo se leen los perfiles (nombre y rol); nunca se guardan contraseñas.
 
         // suscripción a cambios en tickets
         unsubscribeTickets = db.collection('tickets')
@@ -391,6 +376,7 @@ function renderTicketsList(filtered) {
           <div class="action-buttons">
             <button class="action-btn" title="Ver" onclick="openTicketModal('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             <button class="action-btn" title="Editar" onclick="editTicket('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            <button class="action-btn" title="Asignar técnico" onclick="asignarTecnico('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></button>
             <button class="action-btn danger" title="Eliminar" onclick="confirmDelete('${t.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
           </div>
         </td>
@@ -579,6 +565,7 @@ function resetForm() {
 function editTicket(id) {
   const t = tickets.find(x => x.id === id);
   if (!t) return;
+
   if (session.role === 'user' && t.requesterId !== session.userId) {
     showToast('Acceso denegado', 'error'); return;
   }
@@ -605,23 +592,12 @@ function editTicket(id) {
   showSection('create');
 }
 
-/**
- * Guarda un ticket nuevo o actualiza uno existente.
- * Maneja la persistencia en Firebase o LocalStorage según la configuración.
- * @param {Event} e - Evento del formulario.
- */
 async function saveTicket(e) {
   e.preventDefault();
   const title = document.getElementById('ticketTitle').value.trim();
   const category = document.getElementById('ticketCategory').value;
   const priority = document.getElementById('ticketPriority').value;
   const description = document.getElementById('ticketDescription').value.trim();
-
-  // Validación básica de campos obligatorios
-  if (!title || !category || !priority || !description) {
-    showToast('Por favor completa los campos obligatorios.', 'error');
-    return;
-  }
 
   let status = document.getElementById('ticketStatus')?.value || 'Abierto';
   let assigned = document.getElementById('ticketAssigned')?.value.trim() || '';
@@ -680,6 +656,66 @@ function cancelForm() {
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
 }
 
+// ── Asignación rápida de técnico (botón en cada ticket) ──
+const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'];
+
+function asignarTecnico(id) {
+  if (session.role !== 'admin') { showToast('Acceso denegado', 'error'); return; }
+  cerrarMenuAsignar();
+  const overlay = document.createElement('div');
+  overlay.id = 'asignarOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;';
+  overlay.onclick = (e) => { if (e.target === overlay) cerrarMenuAsignar(); };
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:6px;padding:18px 20px;min-width:280px;box-shadow:0 4px 18px rgba(0,0,0,.22);';
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 12px;font-size:15px;';
+  title.textContent = 'Asignar técnico al ticket ' + id;
+  box.appendChild(title);
+  TECNICOS.forEach(tec => {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:6px;';
+    btn.textContent = tec;
+    btn.onclick = () => asignarTecnicoA(id, tec);
+    box.appendChild(btn);
+  });
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-ghost btn-sm';
+  cancelBtn.style.cssText = 'margin-top:4px;color:var(--text-muted);';
+  cancelBtn.textContent = 'Cancelar';
+  cancelBtn.onclick = cerrarMenuAsignar;
+  box.appendChild(cancelBtn);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+function cerrarMenuAsignar() {
+  const o = document.getElementById('asignarOverlay');
+  if (o) o.remove();
+}
+
+async function asignarTecnicoA(id, tecnico) {
+  cerrarMenuAsignar();
+  if (session.role !== 'admin') return;
+  if (useFirebase) {
+    try {
+      await db.collection('tickets').doc(id).update({ assigned: tecnico, updatedAt: new Date().toISOString() });
+      showToast('Ticket ' + id + ' asignado a ' + tecnico, 'success');
+    } catch (err) {
+      showToast('Error al asignar: ' + err.message, 'error');
+    }
+  } else {
+    const idx = tickets.findIndex(t => t.id === id);
+    if (idx !== -1) {
+      tickets[idx] = { ...tickets[idx], assigned: tecnico, updatedAt: new Date().toISOString() };
+      dbSave(tickets);
+      showToast('Ticket ' + id + ' asignado a ' + tecnico, 'success');
+      renderAll();
+    }
+  }
+}
+
 // borrado
 function confirmDelete(id) {
   if (session.role !== 'admin') return;
@@ -725,22 +761,13 @@ function renderReports() {
   ].map(([l, v]) => `<div class="report-item"><span class="report-item-label">${l}</span><span class="report-item-value">${v}</span></div>`).join('');
 }
 
-
-/**
- * Exporta los tickets y usuarios a un archivo JSON.
- * Valida la estructura de datos antes de generar el archivo.
- * @throws {Error} Si los datos no son arreglos válidos o falla la descarga.
- */
+// exportar y limpiar
 function exportJSON() {
   try {
-    if (!Array.isArray(tickets)) {
-      throw new Error('Los datos de tickets no son válidos.');
-    }
-    // Se excluyen usuarios para evitar exponer información sensible (contraseñas) en la exportación
+    if (!Array.isArray(tickets)) throw new Error('Los datos de tickets no son válidos.');
+    // Solo se exportan los tickets. NO se incluyen los usuarios para no exponer
+    // datos sensibles (contraseñas) en el archivo de respaldo.
     const data = JSON.stringify({ tickets }, null, 2);
-    if (typeof downloadFile !== 'function') {
-      throw new Error('Función de descarga no disponible.');
-    }
     downloadFile('helpdesk_backup.json', data, 'application/json');
     showToast('Datos exportados correctamente', 'success');
   } catch (err) {
@@ -831,16 +858,6 @@ async function saveUser(e) {
   const email = document.getElementById('userEmailField').value.trim();
   const password = document.getElementById('userPassword').value;
   const role = document.getElementById('userRole').value;
-
-  // Validación estricta de inputs
-  if (!username || !name || !email || !role) {
-    showToast('Todos los campos son obligatorios.', 'error');
-    return;
-  }
-  if (!id && !password) {
-    showToast('La contraseña es obligatoria para nuevos usuarios.', 'error');
-    return;
-  }
 
   if (useFirebase) {
     try {
