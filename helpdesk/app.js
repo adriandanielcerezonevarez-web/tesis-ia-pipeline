@@ -268,7 +268,7 @@ function showSection(name) {
 
   if (name === 'dashboard') renderDashboard();
   if (name === 'tickets') renderTicketsList();
-  if (name === 'mytickets') renderMyTickets();
+(name === 'mytickets') renderMyTickets();
   if (name === 'reports') renderReports();
   if (name === 'users') renderUsersList();
   if (name === 'create' && !editingId) resetForm();
