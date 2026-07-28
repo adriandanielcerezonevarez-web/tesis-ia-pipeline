@@ -35,7 +35,7 @@ function updateConnectionBadge(online) {
     : '<span style="color:#b76e00;font-size:11px">modo local</span>';
 }
 
-function initAuth() {
+functin initAuth() {
   const s = sessionStorage.getItem(SESSION_KEY);
   if (!s) {
     if (!window.location.pathname.endsWith('login.html')) {
