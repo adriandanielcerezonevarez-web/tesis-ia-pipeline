@@ -792,7 +792,7 @@ function triggerDownload(filename, content, mime) {
  * Exporta los tickets a CSV.
  * @throws {Error} Si `tickets` no es un arreglo o ocurre un error al generar o descargar el archivo.
  */
-function exportCSV() {
+functio exportCSV() {
   try {
     // Validar que tickets sea un arreglo
     if (!Array.isArray(tickets)) {
