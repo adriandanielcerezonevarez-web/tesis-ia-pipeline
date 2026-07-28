@@ -159,30 +159,28 @@ def obtener_cambios(ruta: str) -> str:
     Si no hay contexto de Pull Request o git falla, retorna cadena vacía y el
     análisis se realiza sobre el archivo completo (comportamiento anterior).
     """
-    base = os.environ.get("GITHUB_BASE_REF", "").strip() or "main"
+    evento = os.environ.get("GITHUB_EVENT_NAME", "").strip()
+    base = os.environ.get("GITHUB_BASE_REF", "").strip()
     try:
-        subprocess.run(["git", "fetch", "--depth=1", "origin", base],
-                       capture_output=True, timeout=40)
-        referencia = f"origin/{base}"
+        if evento == "push":
+            # Push (p. ej. merge a main): el cambio es el último commit. HEAD~1 ya está
+            # disponible localmente (el checkout usa fetch-depth: 0). NO hacemos
+            # 'git fetch --depth=1' porque eso vuelve el repo shallow y rompe HEAD~1.
+            ref_base, ref_head = "HEAD~1", "HEAD"
+        else:
+            # pull_request -> rama base del PR; issue_comment (/fix-ia) u otro -> main.
+            destino = base or "main"
+            subprocess.run(["git", "fetch", "origin", destino],
+                           capture_output=True, timeout=60)
+            ref_base, ref_head = f"origin/{destino}", "HEAD"
         salida = subprocess.run(
-            ["git", "diff", "--unified=0", referencia, "--", ruta],
+            ["git", "diff", "--unified=0", ref_base, ref_head, "--", ruta],
             capture_output=True, text=True, timeout=40,
         )
         # Quedarse solo con las líneas agregadas (empiezan con '+' pero no con '+++')
         agregadas = [linea[1:] for linea in salida.stdout.splitlines()
                      if linea.startswith("+") and not linea.startswith("+++")]
-        resultado = "\n".join(agregadas).strip()
-        # Modo push a main: origin/main ya es igual a HEAD, así que el diff sale vacío.
-        # En ese caso usamos el diff del último commit (HEAD~1..HEAD).
-        if not resultado:
-            salida2 = subprocess.run(
-                ["git", "diff", "--unified=0", "HEAD~1", "HEAD", "--", ruta],
-                capture_output=True, text=True, timeout=40,
-            )
-            agregadas2 = [linea[1:] for linea in salida2.stdout.splitlines()
-                          if linea.startswith("+") and not linea.startswith("+++")]
-            resultado = "\n".join(agregadas2).strip()
-        return resultado
+        return "\n".join(agregadas).strip()
     except Exception:
         return ""
 
