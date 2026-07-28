@@ -668,9 +668,24 @@ function asignarTecnico(id) {
   overlay.onclick = (e) => { if (e.target === overlay) cerrarMenuAsignar(); };
   const box = document.createElement('div');
   box.style.cssText = 'background:#fff;border-radius:6px;padding:18px 20px;min-width:280px;box-shadow:0 4px 18px rgba(0,0,0,.22);';
-  box.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;">Asignar técnico al ticket ' + id + '</h3>' +
-    TECNICOS.map(tec => '<button class="btn btn-ghost btn-sm" style="display:block;width:100%;text-align:left;margin-bottom:6px;" onclick="asignarTecnicoA(\'' + id + '\',\'' + tec + '\')">' + tec + '</button>').join('') +
-    '<button class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--text-muted);" onclick="cerrarMenuAsignar()">Cancelar</button>';
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 12px;font-size:15px;';
+  title.textContent = 'Asignar técnico al ticket ' + id;
+  box.appendChild(title);
+  TECNICOS.forEach(tec => {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:6px;';
+    btn.textContent = tec;
+    btn.onclick = () => asignarTecnicoA(id, tec);
+    box.appendChild(btn);
+  });
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-ghost btn-sm';
+  cancelBtn.style.cssText = 'margin-top:4px;color:var(--text-muted);';
+  cancelBtn.textContent = 'Cancelar';
+  cancelBtn.onclick = cerrarMenuAsignar;
+  box.appendChild(cancelBtn);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 }
