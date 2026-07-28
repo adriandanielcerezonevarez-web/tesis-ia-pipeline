@@ -237,7 +237,7 @@ const SECTION_META = {
 
 function showSection(name) {
   // los usuarios normales no entran a las pantallas de admin
-  if (session.role === 'user' && ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
+  if (session.role === 'user'  ['dashboard', 'tickets', 'reports', 'users'].includes(name)) return;
 
   currentSection = name;
 
