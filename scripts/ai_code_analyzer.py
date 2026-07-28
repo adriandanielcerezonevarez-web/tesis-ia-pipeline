@@ -10,6 +10,7 @@ Autor: Adrian Daniel Cerezo Nevarez
 """
 
 import os
+import re
 import time
 import sys
 import json
@@ -170,7 +171,18 @@ def obtener_cambios(ruta: str) -> str:
         # Quedarse solo con las líneas agregadas (empiezan con '+' pero no con '+++')
         agregadas = [linea[1:] for linea in salida.stdout.splitlines()
                      if linea.startswith("+") and not linea.startswith("+++")]
-        return "\n".join(agregadas).strip()
+        resultado = "\n".join(agregadas).strip()
+        # Modo push a main: origin/main ya es igual a HEAD, así que el diff sale vacío.
+        # En ese caso usamos el diff del último commit (HEAD~1..HEAD).
+        if not resultado:
+            salida2 = subprocess.run(
+                ["git", "diff", "--unified=0", "HEAD~1", "HEAD", "--", ruta],
+                capture_output=True, text=True, timeout=40,
+            )
+            agregadas2 = [linea[1:] for linea in salida2.stdout.splitlines()
+                          if linea.startswith("+") and not linea.startswith("+++")]
+            resultado = "\n".join(agregadas2).strip()
+        return resultado
     except Exception:
         return ""
 
@@ -213,6 +225,33 @@ def verificar_sintaxis(codigo: str, extension: str):
                 except OSError:
                     pass
     return None
+
+
+# Patrones peligrosos que, si se INTRODUCEN en las líneas cambiadas, bloquean el merge.
+PATRONES_PELIGROSOS = [
+    (r"""(?i)\b(password|passwd|pwd|secret|api[_-]?key|apikey|token|authorization)\b\s*[:=]\s*['"][^'"]{3,}['"]""",
+     "credencial/secreto hardcodeado"),
+    (r"\beval\s*\(", "uso de eval()"),
+    (r"\.innerHTML\s*=\s*[^;]*\+", "innerHTML con concatenación (riesgo XSS)"),
+    (r"\bdocument\.write\s*\(", "uso de document.write"),
+    (r"""(?i)\b(SELECT|INSERT|UPDATE|DELETE)\b[^;]*['"]\s*\+""",
+     "consulta SQL con concatenación (riesgo de inyección)"),
+    (r"except\s*:\s*pass", "except desnudo que oculta errores"),
+]
+
+
+def _peligros_en_diff(cambios: str):
+    """Devuelve la lista de patrones peligrosos NUEVOS detectados en las líneas cambiadas."""
+    encontrados = []
+    for linea in (cambios or "").split("\n"):
+        l = linea.strip()
+        if not l:
+            continue
+        for patron, desc in PATRONES_PELIGROSOS:
+            if re.search(patron, l):
+                encontrados.append(f"{desc}: {l[:100]}")
+                break
+    return encontrados
 
 
 def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str, cambios: str = "") -> dict:
@@ -319,6 +358,42 @@ Proporciona el análisis completo en el formato JSON especificado.
             recs = analisis.get("recomendaciones_prioritarias", []) or []
             recs.insert(0, "Corregir el error de sintaxis en las líneas modificadas antes de desplegar.")
             analisis["recomendaciones_prioritarias"] = recs
+
+        # GATE CENTRADO EN EL DIFF (cuando hay líneas cambiadas): si el cambio no rompe
+        # la sintaxis y no introduce un patrón peligroso NUEVO, se APRUEBA aunque el resto
+        # del archivo heredado puntúe bajo. Así un cambio limpio a un archivo existente no
+        # queda bloqueado por problemas preexistentes fuera del cambio.
+        if cambios and not err_sintaxis:
+            peligros = _peligros_en_diff(cambios)
+            if peligros:
+                analisis["puntuacion_calidad"] = 3.0
+                analisis["nivel_riesgo"] = "ALTO"
+                analisis["apto_para_merge"] = False
+                problemas = analisis.get("problemas_criticos", []) or []
+                for p in reversed(peligros):
+                    problemas.insert(0, f"Patrón peligroso introducido en el cambio: {p}")
+                analisis["problemas_criticos"] = problemas
+                recs = analisis.get("recomendaciones_prioritarias", []) or []
+                recs.insert(0, "Quitar el patrón peligroso introducido en las líneas modificadas.")
+                analisis["recomendaciones_prioritarias"] = recs
+            else:
+                # Cambio limpio: aprobar sin re-evaluar el resto del archivo heredado.
+                try:
+                    llm_score = float(analisis.get("puntuacion_calidad", 0) or 0)
+                except (TypeError, ValueError):
+                    llm_score = 0.0
+                observaciones = analisis.get("problemas_criticos", []) or []
+                analisis["evaluacion"] = "diff"
+                analisis["puntuacion_calidad"] = round(max(llm_score, 7.0), 1)
+                analisis["nivel_riesgo"] = "BAJO"
+                analisis["apto_para_merge"] = True
+                if observaciones:
+                    analisis["observaciones_archivo"] = observaciones  # informativas, no bloquean
+                analisis["problemas_criticos"] = []
+                analisis["resumen_general"] = (
+                    "Cambio evaluado sobre las líneas modificadas: APTO. El resto del "
+                    "archivo no se re-evalúa para el bloqueo (ver observaciones del archivo)."
+                )
 
         return analisis
 
