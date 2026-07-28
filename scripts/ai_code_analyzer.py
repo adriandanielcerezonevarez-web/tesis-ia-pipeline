@@ -16,6 +16,7 @@ import json
 import argparse
 import textwrap
 import subprocess
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -174,6 +175,46 @@ def obtener_cambios(ruta: str) -> str:
         return ""
 
 
+def verificar_sintaxis(codigo: str, extension: str):
+    """
+    Verificación objetiva de sintaxis (independiente del criterio del LLM).
+    Python -> compile(); JavaScript -> node --check.
+    Retorna None si la sintaxis es válida, o un mensaje de error si NO lo es.
+    Otros lenguajes: retorna None (no se verifica).
+    """
+    ext = (extension or "").lower()
+    if ext == "py":
+        try:
+            compile(codigo, "<archivo>", "exec")
+            return None
+        except SyntaxError as e:
+            return f"línea {e.lineno}: {e.msg}"
+    if ext in ("js", "mjs"):
+        tmp = None
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+                f.write(codigo)
+                tmp = f.name
+            res = subprocess.run(["node", "--check", tmp], capture_output=True, text=True, timeout=30)
+            if res.returncode != 0:
+                # Primera línea útil del error de node
+                msg = (res.stderr or "").strip().split("\n")
+                detalle = next((l.strip() for l in msg if "SyntaxError" in l or "Error" in l), msg[-1] if msg else "error de sintaxis")
+                return detalle[:200]
+            return None
+        except FileNotFoundError:
+            return None  # node no disponible: se omite la verificación
+        except Exception:
+            return None
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+    return None
+
+
 def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str, cambios: str = "") -> dict:
     """
     Envía el código al modelo de IA y retorna el análisis estructurado.
@@ -181,7 +222,9 @@ def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str, c
     Retorna:
         dict con el análisis completo o dict de error
     """
-    # Truncar código muy largo para respetar límites del contexto
+    # Código completo (sin truncar) para la verificación objetiva de sintaxis.
+    codigo_original = codigo
+    # Truncar código muy largo solo para el prompt (respetar límites del contexto).
     max_chars = 100000
     if len(codigo) > max_chars:
         codigo = codigo[:max_chars] + f"\n\n[... ARCHIVO TRUNCADO - {len(codigo) - max_chars} caracteres adicionales no mostrados ...]"
@@ -261,6 +304,22 @@ Proporciona el análisis completo en el formato JSON especificado.
             analisis["apto_para_merge"] = float(analisis.get("puntuacion_calidad", 0)) >= 7
         except (TypeError, ValueError):
             pass
+
+        # VERIFICACIÓN OBJETIVA DE SINTAXIS: si el archivo no compila/parsea, es un
+        # error crítico independiente del criterio del LLM. Se fuerza puntuación baja
+        # y se bloquea, para que /fix-ia lo corrija (atrapa typos como 'cons'->'const').
+        err_sintaxis = verificar_sintaxis(codigo_original, extension)
+        if err_sintaxis:
+            analisis["puntuacion_calidad"] = min(float(analisis.get("puntuacion_calidad", 2) or 2), 2.0)
+            analisis["nivel_riesgo"] = "CRÍTICO"
+            analisis["apto_para_merge"] = False
+            problemas = analisis.get("problemas_criticos", []) or []
+            problemas.insert(0, f"Error de sintaxis ({extension}): {err_sintaxis}")
+            analisis["problemas_criticos"] = problemas
+            recs = analisis.get("recomendaciones_prioritarias", []) or []
+            recs.insert(0, "Corregir el error de sintaxis en las líneas modificadas antes de desplegar.")
+            analisis["recomendaciones_prioritarias"] = recs
+
         return analisis
 
     except json.JSONDecodeError as e:
