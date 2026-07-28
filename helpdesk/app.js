@@ -43,14 +43,7 @@ function initAuth() {
     }
     return false;
   }
-  try {
-    session = JSON.parse(s);
-  } catch (e) {
-    console.error('Sesión corrupta, cerrando sesión:', e);
-    sessionStorage.removeItem(SESSION_KEY);
-    window.location.href = 'login.html';
-    return false;
-  }
+  session = JSON.parse(s);
   document.body.classList.add(`role-${session.role}`);
 
   const nameEl = document.getElementById('userDisplayName');
@@ -79,8 +72,7 @@ function dbLoad() {
   catch { return []; }
 }
 function dbSave(ticketsArr) {
-  try { localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr)); }
-  catch (err) { console.error('Error guardando tickets en local:', err); showToast('Error guardando datos localmente', 'error'); }
+  localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr));
 }
 function dbNextId() {
   const current = parseInt(localStorage.getItem(COUNTER_KEY) || '0', 10);
@@ -93,8 +85,7 @@ function usersLoad() {
   catch { return []; }
 }
 function usersSave(usersArr) {
-  try { localStorage.setItem(USERS_KEY, JSON.stringify(usersArr)); }
-  catch (err) { console.error('Error guardando usuarios en local:', err); showToast('Error guardando usuarios', 'error'); }
+  localStorage.setItem(USERS_KEY, JSON.stringify(usersArr));
 }
 
 // contador atómico en firestore para que dos clientes no choquen
@@ -656,6 +647,9 @@ function cancelForm() {
   showSection(session.role === 'admin' ? 'tickets' : 'mytickets');
 }
 
+
+
+
 // ── Asignación rápida de técnico (botón en cada ticket) ──
 const TECNICOS = ['Ing. Jose Fernandez', 'Ing. Luis Marquez', 'Ing. Eric Villagomez', 'Ing. Carlos Mendoza'];
 
@@ -668,24 +662,9 @@ function asignarTecnico(id) {
   overlay.onclick = (e) => { if (e.target === overlay) cerrarMenuAsignar(); };
   const box = document.createElement('div');
   box.style.cssText = 'background:#fff;border-radius:6px;padding:18px 20px;min-width:280px;box-shadow:0 4px 18px rgba(0,0,0,.22);';
-  const title = document.createElement('h3');
-  title.style.cssText = 'margin:0 0 12px;font-size:15px;';
-  title.textContent = 'Asignar técnico al ticket ' + id;
-  box.appendChild(title);
-  TECNICOS.forEach(tec => {
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-ghost btn-sm';
-    btn.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:6px;';
-    btn.textContent = tec;
-    btn.onclick = () => asignarTecnicoA(id, tec);
-    box.appendChild(btn);
-  });
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'btn btn-ghost btn-sm';
-  cancelBtn.style.cssText = 'margin-top:4px;color:var(--text-muted);';
-  cancelBtn.textContent = 'Cancelar';
-  cancelBtn.onclick = cerrarMenuAsignar;
-  box.appendChild(cancelBtn);
+  box.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px;">Asignar técnico al ticket ' + id + '</h3>' +
+    TECNICOS.map(tec => '<button class="btn btn-ghost btn-sm" style="display:block;width:100%;text-align:left;margin-bottom:6px;" onclick="asignarTecnicoA(\'' + id + '\',\'' + tec + '\')">' + tec + '</button>').join('') +
+    '<button class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--text-muted);" onclick="cerrarMenuAsignar()">Cancelar</button>';
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 }
@@ -763,24 +742,48 @@ function renderReports() {
 
 // exportar y limpiar
 function exportJSON() {
-  try {
-    if (!Array.isArray(tickets)) throw new Error('Los datos de tickets no son válidos.');
-    // Solo se exportan los tickets. NO se incluyen los usuarios para no exponer
-    // datos sensibles (contraseñas) en el archivo de respaldo.
-    const data = JSON.stringify({ tickets }, null, 2);
-    downloadFile('helpdesk_backup.json', data, 'application/json');
-    showToast('Datos exportados correctamente', 'success');
-  } catch (err) {
-    console.error('exportJSON error:', err);
-    showToast('Error al exportar JSON: ' + err.message, 'error');
-  }
+  const data = JSON.stringify({ tickets, users }, null, 2);
+  downloadFile('helpdesk_backup.json', data, 'application/json');
+}
+
+/**
+ * Convierte un ticket en una fila CSV escapada y sanitizada.
+ * @param {Object} t - Objeto ticket esperado con las propiedades usadas.
+ * @returns {string} Fila CSV lista para ser incluida en el archivo.
+ */
+function ticketToCsvRow(t) {
+  // Sanitiza valores que podrían iniciar con =,+,-,@ para prevenir CSV Injection
+  const sanitize = v => {
+    const s = String(v ?? '');
+    return /^[=+\-@]/.test(s) ? `'${s}` : s;
+  };
+  const values = [
+    sanitize(t.id),
+    sanitize(t.title),
+    sanitize(t.category),
+    sanitize(t.priority),
+    sanitize(t.status),
+    sanitize(t.assigned || ''),
+    sanitize(t.requester || ''),
+    sanitize(formatDateFull(t.createdAt))
+  ];
+  // Escapa comillas dobles según RFC4180
+  return values.map(v => `"${v.replace(/"/g, '""')}"`).join(',');
 }
 function exportCSV() {
-  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+  try {
+    if (!Array.isArray(tickets)) {
+      throw new Error('No hay tickets para exportar');
+    }
+    const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
+    const rows = tickets.map(ticketToCsvRow);
+    const csvContent = [headers.join(','), ...rows].join('\r\n');
+    // BOM para que Excel detecte UTF-8
+    downloadFile('tickets.csv', '\uFEFF' + csvContent, 'text/csv;charset=utf-8');
+  } catch (err) {
+    console.error('Error al exportar CSV:', err);
+    showToast('No se pudo exportar el CSV: ' + err.message, 'error');
+  }
 }
 function downloadFile(fname, content, type) {
   const blob = new Blob([content], { type });
