@@ -773,7 +773,7 @@ function downloadFile(fname, content, type) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = fname; a.click(); URL.revokeObjectURL(url);
 }
-async function clearAllData() {
+asyn function clearAllData() {
   if (!confirm('Vas a borrar TODOS los tickets. No hay vuelta atrás. ¿Seguro?')) return;
   if (useFirebase) {
     try {
