@@ -78,7 +78,7 @@ function dbLoad() {
   try { return JSON.parse(localStorage.getItem(DB_KEY)) || []; }
   catch { return []; }
 }
-function dbSave(ticketsArr) {
+funct dbSave(ticketsArr) {
   try { localStorage.setItem(DB_KEY, JSON.stringify(ticketsArr)); }
   catch (err) { console.error('Error guardando tickets en local:', err); showToast('Error guardando datos localmente', 'error'); }
 }
