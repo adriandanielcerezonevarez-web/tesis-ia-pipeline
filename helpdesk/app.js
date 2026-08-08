@@ -748,8 +748,8 @@ function renderReports() {
 
 // exportar y limpiar
 function exportJSON() {
-  tr {
-    i (!Array.isArray(tickets)) throw new Error('Los datos de tickets no son válidos.');
+  try {
+    if (!Array.isArray(tickets)) throw new Error('Los datos de tickets no son válidos.');
     // Solo se exportan los tickets. NO se incluyen los usuarios para no exponer
     // datos sensibles (contraseñas) en el archivo de respaldo.
     const data = JSON.stringify({ tickets }, null, 2);
