@@ -746,20 +746,7 @@ function renderReports() {
   ].map(([l, v]) => `<div class="report-item"><span class="report-item-label">${l}</span><span class="report-item-value">${v}</span></div>`).join('');
 }
 
-// exportar y limpiar
-function exportJSON() {
-  try {
-    if (!Array.isArray(tickets)) throw new Error('Los datos de tickets no son válidos.');
-    // Solo se exportan los tickets. NO se incluyen los usuarios para no exponer
-    // datos sensibles (contraseñas) en el archivo de respaldo.
-    const data = JSON.stringify({ tickets }, null, 2);
-    downloadFile('helpdesk_backup.json', data, 'application/json');
-    showToast('Datos exportados correctamente', 'success');
-  } catch (err) {
-    console.error('exportJSON error:', err);
-    showToast('Error al exportar JSON: ' + err.message, 'error');
-  }
-}
+
 
 
 function downloadFile(fname, content, type) {
