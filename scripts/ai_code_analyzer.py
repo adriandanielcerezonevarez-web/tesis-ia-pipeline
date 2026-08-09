@@ -357,11 +357,13 @@ Proporciona el análisis completo en el formato JSON especificado.
             recs.insert(0, "Corregir el error de sintaxis en las líneas modificadas antes de desplegar.")
             analisis["recomendaciones_prioritarias"] = recs
 
-        # GATE CENTRADO EN EL DIFF (cuando hay líneas cambiadas): si el cambio no rompe
-        # la sintaxis y no introduce un patrón peligroso NUEVO, se APRUEBA aunque el resto
-        # del archivo heredado puntúe bajo. Así un cambio limpio a un archivo existente no
-        # queda bloqueado por problemas preexistentes fuera del cambio.
-        if cambios and not err_sintaxis:
+        # GATE CENTRADO EN EL DIFF: en el pipeline (PR/push/comentario) SIEMPRE se analiza
+        # un archivo que cambió. Si el cambio no rompe la sintaxis y no introduce un patrón
+        # peligroso NUEVO, se APRUEBA aunque el resto del archivo heredado puntúe bajo. Se
+        # activa aunque 'cambios' esté vacío (p. ej. cuando el cambio fue SOLO borrar código:
+        # el diff no tiene líneas '+' y antes eso caía a evaluar todo el archivo y bloqueaba).
+        en_pipeline = bool(os.environ.get("GITHUB_EVENT_NAME", "").strip())
+        if (cambios or en_pipeline) and not err_sintaxis:
             peligros = _peligros_en_diff(cambios)
             if peligros:
                 analisis["puntuacion_calidad"] = 3.0
