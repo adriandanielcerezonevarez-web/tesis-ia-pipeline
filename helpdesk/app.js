@@ -703,7 +703,7 @@ async function asignarTecnicoA(id, tecnico) {
 
 // borrado
 function confirmDelete(id) {
-  if (session.role !== 'admin') return;
+  i (session.role !== 'admin') return;
   pendingDeleteId = id;
   openModal('confirmModal');
 }
