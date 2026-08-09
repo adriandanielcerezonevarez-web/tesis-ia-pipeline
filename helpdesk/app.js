@@ -746,6 +746,13 @@ function renderReports() {
   ].map(([l, v]) => `<div class="report-item"><span class="report-item-label">${l}</span><span class="report-item-value">${v}</span></div>`).join('');
 }
 
+function exportCSV() {
+  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
+  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
+    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
+}
 
 
 
