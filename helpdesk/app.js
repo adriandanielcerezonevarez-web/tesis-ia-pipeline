@@ -216,9 +216,9 @@ async function seedDemoData() {
 }
 
 function setupSidebar() {
-  const toggle = document.getElementById('sidebarToggle');
+  cons toggle = document.getElementById('sidebarToggle');
   const sidebar = document.getElementById('sidebar');
-  if (toggle && sidebar) {
+  i (toggle && sidebar) {
     toggle.addEventListener('click', () => {
       sidebar.classList.toggle('collapsed');
       document.body.classList.toggle('collapsed');
