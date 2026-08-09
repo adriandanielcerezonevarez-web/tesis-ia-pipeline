@@ -31,31 +31,62 @@ jobs:
         run: |
           pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Linter Python (flake8) — la sintaxis bloquea
+      - name: Revisar sintaxis (Python + JavaScript)
+        id: sintaxis
         run: |
           pip install flake8
-          # Errores reales (sintaxis, nombres indefinidos): BLOQUEAN el pipeline.
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.git,__pycache__,node_modules,dist
-          # Estilo y complejidad: solo advertencia (no bloquea).
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics --exclude=.git,__pycache__,node_modules,dist
-      - name: Verificar sintaxis de JavaScript (node --check)
-        run: |
-          echo "Verificando sintaxis de archivos JavaScript del proyecto..."
-          ERRORES=0
+          : > /tmp/errores.txt
+          # Python: solo errores reales (sintaxis, nombres indefinidos), con archivo y linea.
+          flake8 . --select=E9,F63,F7,F82 --exclude=.git,__pycache__,node_modules,dist \
+            --format="- %(path)s  (linea %(row)d): %(text)s" >> /tmp/errores.txt 2>/dev/null || true
+          # JavaScript: verificacion de sintaxis con node --check.
           ARCHIVOS_JS=$(find . -type f \( -name "*.js" -o -name "*.mjs" \) \
             -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "*/.git/*" 2>/dev/null || true)
           for f in $ARCHIVOS_JS; do
             if ! node --check "$f" 2> /tmp/jserr; then
-              echo "::error file=$f::Error de sintaxis en $f"
-              cat /tmp/jserr
-              ERRORES=1
+              LINEA=$(head -1 /tmp/jserr | grep -oE ':[0-9]+' | tail -1 | tr -d ':')
+              MSG=$(grep -m1 -E 'SyntaxError|Error' /tmp/jserr || echo 'Error de sintaxis')
+              echo "- ${f#./}  (linea ${LINEA:-?}): ${MSG}" >> /tmp/errores.txt
             fi
           done
-          if [ "$ERRORES" -ne 0 ]; then
-            echo "Errores de sintaxis en JavaScript. Se detiene ANTES de llamar a la IA."
-            exit 1
+          # Estilo Python (solo advertencia informativa, NO bloquea).
+          flake8 . --exit-zero --max-complexity=10 --max-line-length=120 --exclude=.git,__pycache__,node_modules,dist || true
+          if [ -s /tmp/errores.txt ]; then
+            echo "hay_errores=true" >> $GITHUB_OUTPUT
+            echo "=== Errores de sintaxis encontrados ==="
+            cat /tmp/errores.txt
+          else
+            echo "hay_errores=false" >> $GITHUB_OUTPUT
+            echo "Sintaxis correcta (Python y JavaScript)."
           fi
-          echo "Sintaxis JavaScript correcta."
+      - name: Comentar errores y opciones en el Pull Request
+        if: steps.sintaxis.outputs.hay_errores == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let errores = '';
+            try { errores = fs.readFileSync('/tmp/errores.txt', 'utf8'); } catch (e) {}
+            const cuerpo =
+              '## ❌ Errores de sintaxis detectados (Validación estática)\n\n' +
+              'El código tiene errores de sintaxis, por lo que el pipeline **se detuvo antes de llamar a la IA** ' +
+              'y no se desplegó nada. Estos son:\n\n' +
+              (errores || '_Revisa el log del job para el detalle._') + '\n\n' +
+              '### ¿Cómo quieres corregirlos?\n' +
+              '- Comenta **`/fix-ia`** para que la IA corrija los errores automáticamente.\n' +
+              '- Comenta **`/fix-manual`** si prefieres corregirlos tú y subir un commit nuevo.\n';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: cuerpo
+            });
+      - name: Detener el pipeline si hubo errores de sintaxis
+        if: steps.sintaxis.outputs.hay_errores == 'true'
+        run: |
+          echo "Errores de sintaxis: se detiene el Job 1 y NO se llama a la IA."
+          exit 1
       - name: Pruebas unitarias (pytest) — deben pasar
         run: |
           if [ -d tests ]; then
