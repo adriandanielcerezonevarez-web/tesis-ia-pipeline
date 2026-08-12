@@ -1,4 +1,5 @@
-﻿def calcular_descuento(precio, descuento):
+const 0
+def calcular_descuento(precio, descuento):
     d = precio * descuento / 100
     p = precio - d
     return p
