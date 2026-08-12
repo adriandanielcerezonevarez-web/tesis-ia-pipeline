@@ -2,8 +2,9 @@
 //  App de Validación y Corrección de Código con IA — Backend
 // ============================================================
 //  App autónoma (no depende de GitHub). El usuario sube código,
-//  la IA lo analiza, lo corrige y, si es apto (>= 8), lo despliega
+//  la IA lo analiza, lo corrige y, si es apto (>= 7), lo despliega
 //  automáticamente al HelpDesk (integración con el sistema).
+//  Modelo por defecto: GLM 4.7 (open source) vía Cerebras.
 //
 //  Tesis: Diseño de un modelo de uso de IA en pipelines CI/CD
 //  Autor: Adrian Daniel Cerezo Nevarez
@@ -44,9 +45,9 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3000;
 // Proveedor de IA (Cerebras por defecto; configurable por variables de entorno).
 const LLM_KEY = process.env.CEREBRAS_API_KEY || process.env.GROQ_API_KEY || "";
-const MODELO = process.env.LLM_MODEL || "gpt-oss-120b";
-const MODELO_REPORTE = "gpt-oss-120b"; // nombre mostrado en la interfaz
-const ESFUERZO = MODELO.toLowerCase().includes("glm") ? "none" : "low";
+const MODELO = process.env.LLM_MODEL || "zai-glm-4.7";
+// GLM (temperatura determinista) requiere desactivar el razonamiento; otros modelos usan "low".
+const ESFUERZO = /glm/i.test(MODELO) ? "none" : "low";
 const LLM_URL = process.env.LLM_URL || "https://api.cerebras.ai/v1/chat/completions";
 const UMBRAL = 7;                                    // nota mínima para desplegar
 const MAX_ITER = 4;                                  // correcciones máximas
@@ -332,7 +333,33 @@ async function corregir(codigo, nombre, recomendaciones) {
   return aplicarParches(codigo, raw);
 }
 
-// Aplica solo los bloques @@BUSCAR@@/@@REEMPLAZAR@@ que coinciden EXACTAMENTE con el código.
+// Normaliza una línea para comparar: quita TODOS los espacios. Así el emparejado
+// tolera reformateos del modelo (p. ej. "{ a, b }" vs "{a,b}" o indentación distinta),
+// que es la causa más común de que un parche válido no se aplique con GLM.
+const _norm = (s) => s.replace(/\s+/g, "");
+
+// Reemplazo tolerante: busca el bloque comparando línea por línea sin espacios.
+function reemplazoTolerante(texto, buscar, reemplazar) {
+  const lineas = texto.split("\n");
+  const objetivo = buscar.split("\n").map(_norm);
+  const n = objetivo.length;
+  if (n === 0) return { texto, ok: false };
+  for (let i = 0; i + n <= lineas.length; i++) {
+    let coincide = true;
+    for (let k = 0; k < n; k++) {
+      if (_norm(lineas[i + k]) !== objetivo[k]) { coincide = false; break; }
+    }
+    if (coincide) {
+      const rep = reemplazar === "" ? [""] : reemplazar.split("\n");
+      lineas.splice(i, n, ...rep);
+      return { texto: lineas.join("\n"), ok: true };
+    }
+  }
+  return { texto, ok: false };
+}
+
+// Aplica los bloques @@BUSCAR@@/@@REEMPLAZAR@@: primero coincidencia EXACTA;
+// si falla, coincidencia tolerante a espacios. El resto del código queda intacto.
 function aplicarParches(codigo, respuesta) {
   const re = /@@BUSCAR@@\r?\n([\s\S]*?)\r?\n@@REEMPLAZAR@@\r?\n([\s\S]*?)\r?\n@@FIN@@/g;
   let nuevo = codigo;
@@ -340,8 +367,12 @@ function aplicarParches(codigo, respuesta) {
   while ((m = re.exec(respuesta)) !== null) {
     const buscar = m[1];
     const reemplazar = m[2];
-    if (buscar && nuevo.includes(buscar)) {
+    if (!buscar || !buscar.trim()) continue;
+    if (nuevo.includes(buscar)) {
       nuevo = nuevo.replace(buscar, reemplazar);
+    } else {
+      const r = reemplazoTolerante(nuevo, buscar, reemplazar);
+      if (r.ok) nuevo = r.texto;
     }
   }
   return nuevo;
@@ -378,7 +409,7 @@ ${corregido.slice(0, 6000)}
 // ─────────────────────────────────────────────────────────────
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, modelo: MODELO_REPORTE, configurado: Boolean(LLM_KEY) });
+  res.json({ ok: true, modelo: MODELO, configurado: Boolean(LLM_KEY) });
 });
 
 app.post("/api/analizar", async (req, res) => {
@@ -531,5 +562,5 @@ app.get("/api/reportes/:periodo", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`ARCE-CEREZO VALIDADOR escuchando en el puerto ${PORT} (modelo: ${MODELO_REPORTE})`);
+  console.log(`ARCE-CEREZO VALIDADOR escuchando en el puerto ${PORT} (modelo: ${MODELO})`);
 });
