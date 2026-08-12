@@ -95,7 +95,7 @@
     <button class="nav-item" onclick="ver('reportes')">Reportes IA</button>
     <button class="nav-item" onclick="ver('acerca')">Acerca de</button>
   </nav>
-  <div class="sidebar-footer">Modelo GPT-OSS 120B (open source)<br/>Arce-Cerezo · Tesis</div>
+  <div class="sidebar-footer">Modelo Z.ai GLM 4.7 <br/>Arce-Cerezo · Tesis</div>
 </aside>
 
 <main>
@@ -228,11 +228,11 @@ function renderReporte(a, corregido, progresion, cambios) {
 
   let acciones = "";
   if (apto) {
-    acciones = `<div class="aviso ok">Código apto (≥ 8). Puede desplegarse automáticamente.</div>
+    acciones = `<div class="aviso ok">Código apto (≥ 7). Puede desplegarse automáticamente.</div>
       <div class="row"><button class="btn btn-ok" onclick="pedirDespliegue()">Desplegar automáticamente</button>
       <button class="btn btn-ghost" onclick="descargarPDF()">Descargar reporte PDF</button></div>`;
   } else {
-    acciones = `<div class="aviso warn">Código no apto (&lt; 8). Elige cómo corregirlo:</div>
+    acciones = `<div class="aviso warn">Código no apto (&lt; 7). Elige cómo corregirlo:</div>
       <div class="row">
         <button class="btn btn-warn" onclick="corregirManual()">Lo corrijo yo</button>
         <button class="btn btn-primary" onclick="corregirIA()">Que lo corrija la IA</button>
