@@ -5,9 +5,14 @@ ai_fix_iterativo.py
 Orquestador de corrección iterativa con IA para pipelines CI/CD.
 
 Repite el ciclo (analizar -> corregir) sobre cada archivo hasta que la
-puntuación de calidad alcance un umbral mínimo (por defecto 8/10) o hasta
-agotar el número máximo de iteraciones. Guarda el historial de puntuaciones
-para mostrar la progresión (por ejemplo: 2 -> 6 -> 8).
+puntuación de calidad del modelo alcance un umbral mínimo (por defecto 7/10)
+o hasta agotar el número máximo de iteraciones. Guarda el historial de
+puntuaciones para mostrar la progresión (por ejemplo: 2 -> 5 -> 7).
+
+IMPORTANTE: la corrección NO se detiene apenas se quita el bloqueo (sintaxis o
+patrón peligroso). Usa la puntuación REAL del modelo sobre las líneas cambiadas
+('puntuacion_llm'), así primero corrige el error que bloquea y luego sigue
+mejorando la CALIDAD del código hasta llegar al umbral o no poder mejorar más.
 
 Comando en el Pull Request: /fix-ia
 
@@ -85,16 +90,22 @@ def validar_integridad(original, corregido, ruta):
         except SyntaxError as e:
             return False, f"error de sintaxis Python: {e}"
     elif ext in ("js", "mjs"):
+        tmp = None
         try:
             with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
                 f.write(corregido)
                 tmp = f.name
             resultado = subprocess.run(["node", "--check", tmp], capture_output=True)
-            os.unlink(tmp)
             if resultado.returncode != 0:
                 return False, "error de sintaxis JavaScript"
         except FileNotFoundError:
             pass  # node no disponible: se omite esta comprobación
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     return True, "ok"
 
@@ -119,7 +130,7 @@ def main():
     historial = {}
 
     print(f"\n{'='*60}")
-    print(f"  CORRECCIÓN ITERATIVA CON IA — objetivo: {args.umbral}/10")
+    print(f"  CORRECCIÓN ITERATIVA CON IA — objetivo de calidad: {args.umbral}/10")
     print(f"{'='*60}\n")
 
     for ruta in args.archivos:
@@ -132,31 +143,35 @@ def main():
         scores = []
         print(f"📄 {ruta}")
 
-        # Diff del PR: el análisis y la corrección se enfocan en las líneas cambiadas.
-        cambios = obtener_cambios(ruta)
-        if cambios:
-            print(f"   Enfocando en {len(cambios.splitlines())} línea(s) cambiada(s) del PR.")
-
         for iteracion in range(args.max_iter + 1):
             codigo_actual = Path(ruta).read_text(encoding="utf-8", errors="replace")
-            analisis = analizar_con_ia(cliente, codigo_actual, nombre, extension, cambios)
+            # Se recalcula el diff EN CADA iteración: así, tras aplicar una corrección,
+            # el análisis "ve" las líneas ya arregladas (en vez de quedarse con el diff viejo).
+            cambios = obtener_cambios(ruta)
+            if iteracion == 0 and cambios:
+                print(f"   Enfocando en {len(cambios.splitlines())} línea(s) cambiada(s) del PR.")
 
+            analisis = analizar_con_ia(cliente, codigo_actual, nombre, extension, cambios)
             if "error" in analisis:
                 print(f"   [WARN] Error de análisis: {analisis['error']}")
                 break
 
-            score = analisis.get("puntuacion_calidad", 0)
+            # La puntuación mostrada es el promedio real de las 7 dimensiones.
+            score = float(analisis.get("puntuacion_calidad", 0) or 0)
             scores.append(score)
-            print(f"   Iteración {iteracion}: puntuación {score}/10")
+            apto = bool(analisis.get("apto_para_merge"))
+            print(f"   Iteración {iteracion}: calidad {score}/10 | apto: {apto}")
 
-            if score >= args.umbral:
-                print(f"   ✅ Alcanzó el objetivo ({score} ≥ {args.umbral}) "
+            # Se detiene cuando el cambio queda APTO: puntuación >= umbral Y sin bloqueos
+            # objetivos (sintaxis / patrón peligroso). Así corrige el bloqueo Y mejora la calidad.
+            if apto:
+                print(f"   ✅ Apto (calidad {score} ≥ {args.umbral} y sin bloqueos objetivos) "
                       f"tras {iteracion} corrección(es).\n")
                 break
 
             if iteracion == args.max_iter:
-                print(f"   ⚠️ No alcanzó {args.umbral} tras {args.max_iter} correcciones "
-                      f"(mejor puntuación: {score}).\n")
+                print(f"   ⚠️ No quedó apto tras {args.max_iter} correcciones "
+                      f"(mejor calidad: {score}).\n")
                 break
 
             # Corregir aplicando las recomendaciones del análisis actual.
@@ -193,7 +208,7 @@ def main():
     )
 
     print(f"{'='*60}")
-    print("  Resumen de progresión:")
+    print("  Resumen de progresión de calidad:")
     for archivo, scores in historial.items():
         progresion = " → ".join(str(s) for s in scores) if scores else "sin datos"
         print(f"   {archivo}: {progresion}")

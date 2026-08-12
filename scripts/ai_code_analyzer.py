@@ -166,17 +166,17 @@ def obtener_cambios(ruta: str) -> str:
             # Push (p. ej. merge a main): el cambio es el último commit. HEAD~1 ya está
             # disponible localmente (el checkout usa fetch-depth: 0). NO hacemos
             # 'git fetch --depth=1' porque eso vuelve el repo shallow y rompe HEAD~1.
-            ref_base, ref_head = "HEAD~1", "HEAD"
+            cmd = ["git", "diff", "--unified=0", "HEAD~1", "HEAD", "--", ruta]
         else:
-            # pull_request -> rama base del PR; issue_comment (/fix-ia) u otro -> main.
+            # pull_request -> rama base; issue_comment (/fix-ia) u otro -> main.
+            # Se compara contra el ÁRBOL DE TRABAJO (sin HEAD explícito) para que el
+            # diff incluya las correcciones que /fix-ia aún no ha commiteado; así la
+            # corrección iterativa "ve" que el patrón peligroso ya fue arreglado.
             destino = base or "main"
             subprocess.run(["git", "fetch", "origin", destino],
                            capture_output=True, timeout=60)
-            ref_base, ref_head = f"origin/{destino}", "HEAD"
-        salida = subprocess.run(
-            ["git", "diff", "--unified=0", ref_base, ref_head, "--", ruta],
-            capture_output=True, text=True, timeout=40,
-        )
+            cmd = ["git", "diff", "--unified=0", f"origin/{destino}", "--", ruta]
+        salida = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
         # Quedarse solo con las líneas agregadas (empiezan con '+' pero no con '+++')
         agregadas = [linea[1:] for linea in salida.stdout.splitlines()
                      if linea.startswith("+") and not linea.startswith("+++")]
@@ -271,8 +271,10 @@ def analizar_con_ia(cliente, codigo: str, nombre_archivo: str, extension: str, c
         bloque_enfoque = f"""
 
 ENFOQUE OBLIGATORIO: Esto es un Pull Request. El archivo completo de arriba es SOLO contexto.
-Tus hallazgos, problemas_criticos, recomendaciones y la puntuacion deben referirse UNICAMENTE a
-las siguientes lineas NUEVAS o MODIFICADAS. No reportes nada del codigo que no aparezca aqui:
+Tus hallazgos, problemas_criticos, recomendaciones y la PUNTUACION de CADA dimensión deben
+referirse UNICAMENTE a estas lineas NUEVAS o MODIFICADAS. ASUME que el RESTO del archivo ya es
+correcto y NO lo penalices: si las lineas cambiadas están bien, la puntuacion debe ser ALTA (>=8),
+aunque el resto del archivo tenga defectos. No reportes nada del codigo que no aparezca aqui:
 
 ```
 {cambios}
@@ -331,24 +333,29 @@ Proporciona el análisis completo en el formato JSON especificado.
             try:
                 prom = round(sum(float(d.get("puntuacion", 0)) for d in dims) / len(dims), 1)
                 analisis["puntuacion_calidad"] = prom
+                # Puntuación REAL del modelo sobre las líneas cambiadas. El gate por diff
+                # puede sobrescribir 'puntuacion_calidad', pero 'puntuacion_llm' se conserva
+                # para que la corrección iterativa (/fix-ia) siga mejorando la calidad y no
+                # se detenga apenas se quita el bloqueo.
+                analisis["puntuacion_llm"] = prom
                 analisis["nivel_riesgo"] = (
                     "BAJO" if prom >= 8 else "MEDIO" if prom >= 6 else "ALTO" if prom >= 4 else "CRÍTICO"
                 )
             except (TypeError, ValueError):
                 pass
-        # Aptitud por umbral numérico (>= 7), sin depender del criterio variable del modelo.
+        # LA PUNTUACIÓN DECIDE: apto si el promedio real de las 7 dimensiones es >= 7.
+        # IMPORTANTE: la puntuación mostrada NUNCA se altera; es siempre ese promedio, así
+        # coincide con la suma de las dimensiones dividida entre 7.
         try:
             analisis["apto_para_merge"] = float(analisis.get("puntuacion_calidad", 0)) >= 7
         except (TypeError, ValueError):
-            pass
+            analisis["apto_para_merge"] = False
 
-        # VERIFICACIÓN OBJETIVA DE SINTAXIS: si el archivo no compila/parsea, es un
-        # error crítico independiente del criterio del LLM. Se fuerza puntuación baja
-        # y se bloquea, para que /fix-ia lo corrija (atrapa typos como 'cons'->'const').
+        # CONTROLES OBJETIVOS sobre el cambio: bloquean AUNQUE la puntuación sea alta,
+        # sin tocar la puntuación mostrada.
+        # 1) Sintaxis inválida (py_compile / node --check).
         err_sintaxis = verificar_sintaxis(codigo_original, extension)
         if err_sintaxis:
-            analisis["puntuacion_calidad"] = min(float(analisis.get("puntuacion_calidad", 2) or 2), 2.0)
-            analisis["nivel_riesgo"] = "CRÍTICO"
             analisis["apto_para_merge"] = False
             problemas = analisis.get("problemas_criticos", []) or []
             problemas.insert(0, f"Error de sintaxis ({extension}): {err_sintaxis}")
@@ -357,17 +364,11 @@ Proporciona el análisis completo en el formato JSON especificado.
             recs.insert(0, "Corregir el error de sintaxis en las líneas modificadas antes de desplegar.")
             analisis["recomendaciones_prioritarias"] = recs
 
-        # GATE CENTRADO EN EL DIFF: en el pipeline (PR/push/comentario) SIEMPRE se analiza
-        # un archivo que cambió. Si el cambio no rompe la sintaxis y no introduce un patrón
-        # peligroso NUEVO, se APRUEBA aunque el resto del archivo heredado puntúe bajo. Se
-        # activa aunque 'cambios' esté vacío (p. ej. cuando el cambio fue SOLO borrar código:
-        # el diff no tiene líneas '+' y antes eso caía a evaluar todo el archivo y bloqueaba).
+        # 2) Patrón peligroso NUEVO en las líneas cambiadas (credencial, eval, XSS, SQL, etc.).
         en_pipeline = bool(os.environ.get("GITHUB_EVENT_NAME", "").strip())
         if (cambios or en_pipeline) and not err_sintaxis:
             peligros = _peligros_en_diff(cambios)
             if peligros:
-                analisis["puntuacion_calidad"] = 3.0
-                analisis["nivel_riesgo"] = "ALTO"
                 analisis["apto_para_merge"] = False
                 problemas = analisis.get("problemas_criticos", []) or []
                 for p in reversed(peligros):
@@ -376,24 +377,6 @@ Proporciona el análisis completo en el formato JSON especificado.
                 recs = analisis.get("recomendaciones_prioritarias", []) or []
                 recs.insert(0, "Quitar el patrón peligroso introducido en las líneas modificadas.")
                 analisis["recomendaciones_prioritarias"] = recs
-            else:
-                # Cambio limpio: aprobar sin re-evaluar el resto del archivo heredado.
-                try:
-                    llm_score = float(analisis.get("puntuacion_calidad", 0) or 0)
-                except (TypeError, ValueError):
-                    llm_score = 0.0
-                observaciones = analisis.get("problemas_criticos", []) or []
-                analisis["evaluacion"] = "diff"
-                analisis["puntuacion_calidad"] = round(max(llm_score, 7.0), 1)
-                analisis["nivel_riesgo"] = "BAJO"
-                analisis["apto_para_merge"] = True
-                if observaciones:
-                    analisis["observaciones_archivo"] = observaciones  # informativas, no bloquean
-                analisis["problemas_criticos"] = []
-                analisis["resumen_general"] = (
-                    "Cambio evaluado sobre las líneas modificadas: APTO. El resto del "
-                    "archivo no se re-evalúa para el bloqueo (ver observaciones del archivo)."
-                )
 
         return analisis
 
