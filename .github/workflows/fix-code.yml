@@ -26,7 +26,7 @@ jobs:
   #  /fix-ia : la IA corrige iterativamente (solo lo que cambió)
   # ──────────────────────────────────────────────────────────
   fix-ia:
-    name: "🤖 Corrección Automática con IA"
+    name: " Corrección Automática con IA"
     runs-on: ubuntu-latest
     if: >
       github.event.issue.pull_request &&
@@ -125,12 +125,12 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let cuerpo = '## 🤖 Corrección automática con IA (`/fix-ia`)\n\n';
+            let cuerpo = '##  Corrección automática con IA (`/fix-ia`)\n\n';
 
             // Progresión de la puntuación (antes -> después de cada iteración)
             try {
               const hist = JSON.parse(fs.readFileSync('historial-correccion.json', 'utf8'));
-              cuerpo += '### 📈 Progresión de la puntuación de calidad\n\n';
+              cuerpo += '###  Progresión de la puntuación de calidad\n\n';
               for (const [archivo, scores] of Object.entries(hist)) {
                 const linea = scores.length ? scores.join(' → ') + ' / 10' : 'sin datos';
                 const ok = scores.length && scores[scores.length - 1] >= 7 ? ' ✅' : ' ⚠️';
@@ -171,7 +171,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: '⚠️ No se detectaron archivos de código en este PR para corregir con IA.'
+              body: ' No se detectaron archivos de código en este PR para corregir con IA.'
             });
 
   # ──────────────────────────────────────────────────────────
@@ -199,14 +199,14 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: '📝 **Modo corrección manual seleccionado.**\n\nRevisa las recomendaciones del reporte de análisis de IA en este Pull Request, aplica los cambios en tu código y vuelve a subir un commit a esta rama. El pipeline analizará automáticamente los nuevos cambios y actualizará la puntuación de calidad.'
+              body: ' **Modo corrección manual seleccionado.**\n\nRevisa las recomendaciones del reporte de análisis de IA en este Pull Request, aplica los cambios en tu código y vuelve a subir un commit a esta rama. El pipeline analizará automáticamente los nuevos cambios y actualizará la puntuación de calidad.'
             });
 
   # ──────────────────────────────────────────────────────────
   #  /desplegar-forzado : despliega el código del PR AUNQUE no pase el gate
   # ──────────────────────────────────────────────────────────
   desplegar-forzado:
-    name: "⚠️ Despliegue Forzado (a pesar de los riesgos)"
+    name: " Despliegue Forzado (a pesar de los riesgos)"
     runs-on: ubuntu-latest
     if: >
       github.event.issue.pull_request &&
