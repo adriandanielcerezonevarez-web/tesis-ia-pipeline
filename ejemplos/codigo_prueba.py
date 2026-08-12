@@ -1,4 +1,4 @@
-﻿def calcular_descuento(precio, descuento):
+def calcular_descuento(precio, descuento):
     d = precio * descuento / 100
     p = precio - d
     return p
@@ -9,7 +9,7 @@ def proc(lst):
         if i > 0:
             r.append(i)
     return r
-int 0
+
 x = 100
 y = calcular_descuento(x, 20)
 print(y)
