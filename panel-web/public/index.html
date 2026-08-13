@@ -152,7 +152,7 @@
         <p>El usuario sube su código y la app aplica un proceso CI/CD con IA: analiza la calidad en 7 dimensiones,
         entrega un reporte descargable en PDF, y según la puntuación permite desplegar automáticamente
         (integrándose al sistema del usuario) o corregir el código —manualmente o con la IA— hasta que sea apto.</p>
-        <p style="margin-top:10px">Modelo: <b>GPT-OSS 120B</b> (open source, vía Cerebras). Independiente de cualquier plataforma.</p>
+        <p style="margin-top:10px">Modelo: <b>Z.ai GLM 4.7</b> (open source, vía Cerebras). Independiente de cualquier plataforma.</p>
       </div>
     </div>
 
@@ -353,7 +353,7 @@ function descargarPDF() {
   let y = 18;
   doc.setFontSize(16); doc.text("Reporte de Calidad de Código - IA", 14, y); y += 8;
   doc.setFontSize(10); doc.setTextColor(120);
-  doc.text("Archivo: " + nombreActual + "  |  Modelo: GPT-OSS 120B", 14, y); y += 10;
+  doc.text("Archivo: " + nombreActual + "  |  Z.ai glm 4.7", 14, y); y += 10;
   doc.setTextColor(30); doc.setFontSize(13);
   doc.text("Puntuacion: " + a.puntuacion_calidad + "/10   Riesgo: " + a.nivel_riesgo, 14, y); y += 8;
   doc.setFontSize(10);
