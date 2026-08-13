@@ -96,7 +96,6 @@ function usersSave(usersArr) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(usersArr)); }
   catch (err) { console.error('Error guardando usuarios en local:', err); showToast('Error guardando usuarios', 'error'); }
 }
-
 // contador atómico en firestore para que dos clientes no choquen
 async function fbNextId() {
   const counterRef = db.collection('meta').doc('counter');
@@ -725,30 +724,6 @@ async function executeDelete() {
   pendingDeleteId = null;
   closeConfirmModal();
 }
-function exportJSON() {
-  try {
-    if (!Array.isArray(tickets)) throw new Error('Los datos de tickets no son válidos.');
-    const data = JSON.stringify({ tickets }, null, 2);
-    downloadFile('helpdesk_backup.json', data, 'application/json');
-    showToast('Datos exportados correctamente', 'success');
-  } catch (err) {
-    console.error('exportJSON error:', err);
-    showToast('Error al exportar JSON: ' + err.message, 'error');
-  }
-}
-
-
-// Exporta la lista de tickets actual a un archivo CSV
-function exportCSV() {
-  // Validación: verificar si hay tickets disponibles
-  if (!tickets || tickets.length === 0) return;
-
-  const headers = ['ID', 'Título', 'Categoría', 'Prioridad', 'Estado', 'Asignado', 'Solicitante', 'Creado'];
-  const rows = tickets.map(t => [t.id, t.title, t.category, t.priority, t.status, t.assigned || '', t.requester || '', formatDateFull(t.createdAt)]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  downloadFile('tickets.csv', '\uFEFF' + csv, 'text/csv;charset=utf-8');
-}
 
 // reportes
 function renderReports() {
@@ -865,12 +840,12 @@ async function saveUser(e) {
         showToast('Usuario actualizado', 'success');
       } else {
         // que no haya otro con el mismo username
-        const snap = await db.collection('users').where('username', '==', username.toLowerCase()).get();
-        if (!snap.empty) { showToast('Nombre de usuario en uso', 'error'); return; }
-        const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
-        await db.collection('users').doc(newUser.id).set(newUser);
-        users.push(newUser);
-        showToast('Usuario creado', 'success');
+      const snap = await db.collection('users').where('username', '==', username.toLowerCase()).get();
+      if (!snap.empty) { showToast('Nombre de usuario en uso', 'error'); return; }
+      const newUser = { id: `u${Date.now()}`, username, name, email, password: simpleHash(password), role, createdAt: new Date().toISOString() };
+      await db.collection('users').doc(newUser.id).set(newUser);
+      users.push(newUser);
+      showToast('Usuario creado', 'success');
       }
     } catch (err) {
       showToast('Error al guardar usuario: ' + err.message, 'error');
@@ -892,7 +867,7 @@ async function saveUser(e) {
       if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
         showToast('Nombre de usuario en uso', 'error'); return;
       }
-      const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
+      const newUser = { id: `u${Date.now()}`, username, name, email, role, createdAt: new Date().toISOString() };
       users.push(newUser);
       usersSave(users);
       showToast('Usuario creado', 'success');
@@ -955,8 +930,13 @@ function showToast(message, type = 'info') {
   }, 3200);
 }
 
-function escHtml(str) { return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function trySet(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+// Función auxiliar para hashear contraseñas (SHA-256)
+async function simpleHash(str) {
+  const msgBuffer = new TextEncoder().encode(str);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 function tryVal(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
 function tryWidth(id, val) { const el = document.getElementById(id); if (el) el.style.width = val; }
 
