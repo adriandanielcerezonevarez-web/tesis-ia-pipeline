@@ -731,30 +731,25 @@ async function executeDelete() {
 
 // Exporta los tickets a un archivo JSON.
 function exportarReporteJSON(t) {
-  var d = "";
-  for (var i = 0; i < t.length; i++) {
-    d = d + JSON.stringify(t[i]) + "\n";
-  }
-  var b = new Blob([d]);
-  var u = URL.createObjectURL(b);
-  var a = document.createElement("a");
-  a.href = u;
-  a.download = "reporte.json";
-  a.click();
+  if (!t || !t.length) return;
+  const data = t.map(item => JSON.stringify(item)).join('\n');
+  downloadFile('reporte.json', data, 'application/json');
 }
 
 
 // Exporta los tickets a un archivo CSV.
 function exportarReporteCSV(t) {
-  var c = "id,titulo,estado\n";
-  for (var i = 0; i < t.length; i++) {
-    c = c + t[i].id + "," + t[i].titulo + "," + t[i].estado + "\n";
-  }
-  var b = new Blob([c]);
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(b);
-  a.download = "reporte.csv";
-  a.click();
+  if (!t || !t.length) return;
+  const headers = ['id', 'title', 'status'];
+  const rows = t.map(item => 
+    headers.map(h => {
+      let val = String(item[h] || '');
+      if (val.includes(',')) val = `"${val}"`;
+      return val;
+    }).join(',')
+  );
+  const csvContent = [headers.join(','), ...rows].join('\n');
+  downloadFile('reporte.csv', csvContent, 'text/csv');
 }
 
 function renderReports() {
