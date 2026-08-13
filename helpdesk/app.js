@@ -728,6 +728,30 @@ async function executeDelete() {
 
 
 // reportes
+
+// Exporta los tickets a un archivo JSON.
+function exportarReporteJSON(t) {
+  if (!t || !t.length) return;
+  const data = t.map(item => JSON.stringify(item)).join('\n');
+  downloadFile('reporte.json', data, 'application/json');
+}
+
+
+// Exporta los tickets a un archivo CSV.
+function exportarReporteCSV(t) {
+  if (!t || !t.length) return;
+  const headers = ['id', 'title', 'status'];
+  const rows = t.map(item => 
+    headers.map(h => {
+      let val = String(item[h] || '');
+      if (val.includes(',')) val = `"${val}"`;
+      return val;
+    }).join(',')
+  );
+  const csvContent = [headers.join(','), ...rows].join('\n');
+  downloadFile('reporte.csv', csvContent, 'text/csv');
+}
+
 function renderReports() {
   if (session.role !== 'admin') return;
   const total = tickets.length;
