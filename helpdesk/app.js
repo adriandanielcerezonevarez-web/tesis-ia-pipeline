@@ -96,6 +96,16 @@ function usersSave(usersArr) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(usersArr)); }
   catch (err) { console.error('Error guardando usuarios en local:', err); showToast('Error guardando usuarios', 'error'); }
 }
+// Simple hash para demo local (NO usar en prod)
+function simpleHash(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(16);
+}
 
 // contador atómico en firestore para que dos clientes no choquen
 async function fbNextId() {
@@ -318,10 +328,10 @@ function renderDashboard() {
   const progress = tickets.filter(t => t.status === 'En Progreso').length;
   const closed = tickets.filter(t => t.status === 'Resuelto' || t.status === 'Cerrado').length;
 
-  trySet('stat-total', total);
-  trySet('stat-open', open);
-  trySet('stat-progress', progress);
-  trySet('stat-closed', closed);
+  setTextContent('stat-total', total);
+  setTextContent('stat-open', open);
+  setTextContent('stat-progress', progress);
+  setTextContent('stat-closed', closed);
 
   const pc = { 'Crítica': 0, 'Alta': 0, 'Media': 0, 'Baja': 0 };
   tickets.forEach(t => { if (pc[t.priority] !== undefined) pc[t.priority]++; });
@@ -724,10 +734,7 @@ async function executeDelete() {
   }
   pendingDeleteId = null;
   closeConfirmModal();
-
-
-
-
+}
 
 // reportes
 function renderReports() {
@@ -846,10 +853,10 @@ async function saveUser(e) {
         // que no haya otro con el mismo username
         const snap = await db.collection('users').where('username', '==', username.toLowerCase()).get();
         if (!snap.empty) { showToast('Nombre de usuario en uso', 'error'); return; }
-        const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
-        await db.collection('users').doc(newUser.id).set(newUser);
-        users.push(newUser);
-        showToast('Usuario creado', 'success');
+      const newUser = { id: `u${Date.now()}`, username, name, email, password: simpleHash(password), role, createdAt: new Date().toISOString() };
+      await db.collection('users').doc(newUser.id).set(newUser);
+      users.push(newUser);
+      showToast('Usuario creado', 'success');
       }
     } catch (err) {
       showToast('Error al guardar usuario: ' + err.message, 'error');
@@ -871,7 +878,7 @@ async function saveUser(e) {
       if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
         showToast('Nombre de usuario en uso', 'error'); return;
       }
-      const newUser = { id: `u${Date.now()}`, username, name, email, password, role, createdAt: new Date().toISOString() };
+      const newUser = { id: `u${Date.now()}`, username, name, email, password: simpleHash(password), role, createdAt: new Date().toISOString() };
       users.push(newUser);
       usersSave(users);
       showToast('Usuario creado', 'success');
@@ -934,8 +941,8 @@ function showToast(message, type = 'info') {
   }, 3200);
 }
 
-function escHtml(str) { return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function trySet(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+function escHtml(str) { return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
+function setTextContent(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
 function tryVal(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
 function tryWidth(id, val) { const el = document.getElementById(id); if (el) el.style.width = val; }
 
