@@ -747,7 +747,10 @@ function renderReports() {
   ].map(([l, v]) => `<div class="report-item"><span class="report-item-label">${l}</span><span class="report-item-value">${v}</span></div>`).join('');
 }
 
-
+function exportJSON() {
+  const data = JSON.stringify({ tickets, users }, null, 2);
+  downloadFile('helpdesk_backup.json', data, 'application/json');
+}
 
 function downloadFile(fname, content, type) {
   const blob = new Blob([content], { type });
