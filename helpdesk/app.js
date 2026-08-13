@@ -729,30 +729,26 @@ async function executeDelete() {
 
 // Exporta los tickets a un archivo JSON.
 function exportarReporteJSON(t) {
-  var d = "";
-  for (var i = 0; i < t.length; i++) {
-    d = d + JSON.stringify(t[i]) + "\n";
+  try {
+    if (!Array.isArray(t)) return;
+    const content = t.map(item => JSON.stringify(item)).join('\n');
+    downloadFile("reporte.json", content, "application/json");
+  } catch (err) {
+    console.error("Error exportando JSON:", err);
   }
-  var b = new Blob([d]);
-  var u = URL.createObjectURL(b);
-  var a = document.createElement("a");
-  a.href = u;
-  a.download = "reporte.json";
-  a.click();
 }
 
 
 // Exporta los tickets a un archivo CSV.
 function exportarReporteCSV(t) {
-  var c = "id,titulo,estado\n";
-  for (var i = 0; i < t.length; i++) {
-    c = c + t[i].id + "," + t[i].titulo + "," + t[i].estado + "\n";
+  try {
+    if (!Array.isArray(t)) return;
+    const header = "id,title,status\n";
+    const rows = t.map(item => `${item.id},"${item.title}","${item.status}"`).join('\n');
+    downloadFile("reporte.csv", header + rows, "text/csv");
+  } catch (err) {
+    console.error("Error exportando CSV:", err);
   }
-  var b = new Blob([c]);
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(b);
-  a.download = "reporte.csv";
-  a.click();
 }
 
 // reportes
