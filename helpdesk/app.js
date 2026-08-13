@@ -727,29 +727,6 @@ async function executeDelete() {
 }
 
 
-// Exporta los tickets a un archivo JSON.
-function exportarReporteJSON(t) {
-  try {
-    if (!Array.isArray(t)) return;
-    const content = t.map(item => JSON.stringify(item)).join('\n');
-    downloadFile("reporte.json", content, "application/json");
-  } catch (err) {
-    console.error("Error exportando JSON:", err);
-  }
-}
-
-
-// Exporta los tickets a un archivo CSV.
-function exportarReporteCSV(t) {
-  try {
-    if (!Array.isArray(t)) return;
-    const header = "id,title,status\n";
-    const rows = t.map(item => `${item.id},"${item.title}","${item.status}"`).join('\n');
-    downloadFile("reporte.csv", header + rows, "text/csv");
-  } catch (err) {
-    console.error("Error exportando CSV:", err);
-  }
-}
 
 // reportes
 function renderReports() {
