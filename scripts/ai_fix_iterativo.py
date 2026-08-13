@@ -38,10 +38,53 @@ except ImportError:
     print("ERROR: Librería 'openai' no instalada. Ejecuta: pip install openai")
     sys.exit(1)
 
-from ai_code_analyzer import analizar_con_ia, leer_archivo, obtener_cambios
+from ai_code_analyzer import (
+    analizar_con_ia, leer_archivo, obtener_cambios, MODELO_API, ESFUERZO,
+)
 from ai_code_fixer import corregir_con_ia
 
 CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+
+
+def resumir_cambios(cliente, original, corregido, nombre):
+    """
+    Pide al modelo que compare el código ORIGINAL con el CORREGIDO y explique, por
+    cada cambio importante: qué se cambió, por qué, y cuál fue la mejora. Devuelve
+    una lista de dicts {que, porque, mejora}. Es lo que enriquece el reporte de /fix-ia,
+    igual que en la app web del validador.
+    """
+    sistema = ("Eres un revisor de código que explica los cambios de forma clara, breve y "
+               "objetiva. Responde SOLO con JSON, sin texto adicional.")
+    usuario = f"""Compara el código ORIGINAL con el CORREGIDO del archivo {nombre} y lista los
+cambios más importantes que se hicieron. Para cada cambio indica: qué se cambió, por qué se
+cambió, y cuál fue la mejora obtenida.
+Responde SOLO este JSON (máximo 6 cambios, los más relevantes):
+{{ "cambios": [ {{ "que": "descripción breve", "porque": "motivo", "mejora": "beneficio" }} ] }}
+
+ORIGINAL:
+```
+{original[:6000]}
+```
+
+CORREGIDO:
+```
+{corregido[:6000]}
+```"""
+    try:
+        r = cliente.chat.completions.create(
+            model=MODELO_API,
+            messages=[{"role": "system", "content": sistema},
+                      {"role": "user", "content": usuario}],
+            temperature=0, max_tokens=2500, reasoning_effort=ESFUERZO,
+        )
+        txt = (r.choices[0].message.content or "").strip()
+        ini, fin = txt.find("{"), txt.rfind("}")
+        if ini >= 0 and fin > ini:
+            txt = txt[ini:fin + 1]
+        return json.loads(txt).get("cambios", []) or []
+    except Exception as e:
+        print(f"   [WARN] No se pudo resumir los cambios: {e}")
+        return []
 
 
 def construir_recomendaciones(analisis: dict) -> str:
@@ -128,6 +171,7 @@ def main():
 
     cliente = OpenAI(api_key=api_key, base_url=CEREBRAS_BASE_URL)
     historial = {}
+    resumenes = {}   # por archivo: {cambios:[{que,porque,mejora}], codigo: "..."}
 
     print(f"\n{'='*60}")
     print(f"  CORRECCIÓN ITERATIVA CON IA — objetivo de calidad: {args.umbral}/10")
@@ -202,9 +246,22 @@ def main():
 
         historial[ruta] = scores
 
-    # Guardar historial para el reporte del pipeline
+        # Si el archivo cambió, resumir QUÉ/POR QUÉ/MEJORA y guardar el código corregido
+        # (para que el reporte de /fix-ia sea tan detallado como el de la app web).
+        final = Path(ruta).read_text(encoding="utf-8", errors="replace")
+        if final.strip() != contenido.strip():
+            print("   📝 Resumiendo los cambios aplicados…")
+            resumenes[ruta] = {
+                "cambios": resumir_cambios(cliente, contenido, final, nombre),
+                "codigo": final,
+            }
+
+    # Guardar historial y resumen de cambios para el reporte del pipeline
     Path("historial-correccion.json").write_text(
         json.dumps(historial, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    Path("resumen-cambios.json").write_text(
+        json.dumps(resumenes, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
     print(f"{'='*60}")
