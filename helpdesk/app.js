@@ -729,30 +729,32 @@ async function executeDelete() {
 748
 // Exporta los tickets a un archivo JSON.
 function exportarReporteJSON(t) {
-  var d = "";
-  for (var i = 0; i < t.length; i++) {
-    d = d + JSON.stringify(t[i]) + "\n";
+  if (!t || !t.length) return;
+  try {
+    const content = t.map(item => JSON.stringify(item)).join('\n');
+    downloadFile('reporte.json', content, 'application/json');
+  } catch (err) {
+    console.error('Error exportando JSON:', err);
+    showToast('Error al exportar JSON', 'error');
   }
-  var b = new Blob([d]);
-  var u = URL.createObjectURL(b);
-  var a = document.createElement("a");
-  a.href = u;
-  a.download = "reporte.json";
-  a.click();
 }
 
 
 // Exporta los tickets a un archivo CSV.
 function exportarReporteCSV(t) {
-  var c = "id,titulo,estado\n";
-  for (var i = 0; i < t.length; i++) {
-    c = c + t[i].id + "," + t[i].titulo + "," + t[i].estado + "\n";
+  if (!t || !t.length) return;
+  try {
+    const header = "id,title,status\n";
+    const rows = t.map(item => {
+      const safeTitle = (item.title || '').replace(/"/g, '""');
+      const safeStatus = (item.status || '').replace(/"/g, '""');
+      return `${item.id},"${safeTitle}","${safeStatus}"`;
+    }).join('\n');
+    downloadFile('reporte.csv', header + rows, 'text/csv');
+  } catch (err) {
+    console.error('Error exportando CSV:', err);
+    showToast('Error al exportar CSV', 'error');
   }
-  var b = new Blob([c]);
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(b);
-  a.download = "reporte.csv";
-  a.click();
 }
 
 
