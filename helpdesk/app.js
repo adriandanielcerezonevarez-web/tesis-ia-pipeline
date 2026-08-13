@@ -725,18 +725,18 @@ async function executeDelete() {
   pendingDeleteId = null;
   closeConfirmModal();
 }
-function exportJSON() {
-  try {
-    if (!Array.isArray(tickets)) throw new Error('Los datos de tickets no son válidos.');
-    const data = JSON.stringify({ tickets }, null, 2);
-    downloadFile('helpdesk_backup.json', data, 'application/json');
-    showToast('Datos exportados correctamente', 'success');
-  } catch (err) {
-    console.error('exportJSON error:', err);
-    showToast('Error al exportar JSON: ' + err.message, 'error');
-  }
-}
 
+function exportarReporteCSV(t) {
+  var c = "id,titulo,estado\n";
+  for (var i = 0; i < t.length; i++) {
+    c = c + t[i].id + "," + t[i].titulo + "," + t[i].estado + "\n";
+  }
+  var b = new Blob([c]);
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(b);
+  a.download = "reporte.csv";
+  a.click();
+}
 
 // Exporta la lista de tickets actual a un archivo CSV
 function exportCSV() {
