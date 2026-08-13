@@ -725,7 +725,10 @@ async function executeDelete() {
   pendingDeleteId = null;
   closeConfirmModal();
 }
-
+function exportJSON() {
+  const data = JSON.stringify({ tickets, users }, null, 2);
+  downloadFile('helpdesk_backup.json', data, 'application/json');
+}
 
 // reportes
 function renderReports() {
