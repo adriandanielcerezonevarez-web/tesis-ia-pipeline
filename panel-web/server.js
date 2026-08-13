@@ -13,6 +13,7 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import ExcelJS from "exceljs";
 
@@ -20,7 +21,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
-app.use(express.static(path.join(__dirname, "public")));
 
 // ─────────────────────────────────────────────────────────────
 //  CORS: solo se aceptan peticiones desde orígenes autorizados.
@@ -41,6 +41,69 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
+// ─────────────────────────────────────────────────────────────
+//  AUTENTICACIÓN — una sola cuenta, definida por variables de entorno.
+//  El validador exige iniciar sesión antes de usar la app o las rutas /api.
+// ─────────────────────────────────────────────────────────────
+const AUTH_USER = process.env.VALIDADOR_USER || "admin";
+const AUTH_PASS = process.env.VALIDADOR_PASS || "cambiame123";
+const SESSION_SECRET = process.env.SESSION_SECRET || "cambia-este-secreto-arce-cerezo";
+const SESION_DIAS = 7;
+
+function firmarSesion(usuario) {
+  const payload = `${usuario}.${Date.now()}`;
+  const firma = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("hex");
+  return Buffer.from(`${payload}.${firma}`).toString("base64");
+}
+function sesionValida(token) {
+  if (!token) return false;
+  try {
+    const [usuario, ts, firma] = Buffer.from(token, "base64").toString("utf-8").split(".");
+    if (!usuario || !ts || !firma) return false;
+    const esperado = crypto.createHmac("sha256", SESSION_SECRET).update(`${usuario}.${ts}`).digest("hex");
+    if (firma.length !== esperado.length) return false;
+    if (!crypto.timingSafeEqual(Buffer.from(firma), Buffer.from(esperado))) return false;
+    return (Date.now() - Number(ts)) < SESION_DIAS * 24 * 3600 * 1000;
+  } catch (e) {
+    return false;
+  }
+}
+function leerCookie(req, nombre) {
+  const m = (req.headers.cookie || "").match(new RegExp("(?:^|; )" + nombre + "=([^;]+)"));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// Rutas públicas (no requieren sesión): la página de login y su endpoint.
+const RUTAS_PUBLICAS = new Set(["/login.html", "/api/login", "/favicon.ico"]);
+
+// Endpoint de login: valida usuario/contraseña y entrega la cookie de sesión firmada.
+app.post("/api/login", (req, res) => {
+  const { usuario, clave } = req.body || {};
+  if (usuario === AUTH_USER && typeof clave === "string" && clave === AUTH_PASS) {
+    const token = firmarSesion(usuario);
+    res.setHeader("Set-Cookie",
+      `sesion=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${SESION_DIAS * 24 * 3600}; SameSite=Lax`);
+    return res.json({ ok: true });
+  }
+  return res.status(401).json({ ok: false, error: "Usuario o contraseña incorrectos." });
+});
+
+app.post("/api/logout", (req, res) => {
+  res.setHeader("Set-Cookie", "sesion=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax");
+  res.json({ ok: true });
+});
+
+// Middleware de sesión: protege la app y todas las rutas /api.
+app.use((req, res, next) => {
+  if (RUTAS_PUBLICAS.has(req.path)) return next();
+  if (sesionValida(leerCookie(req, "sesion"))) return next();
+  if (req.path.startsWith("/api/")) return res.status(401).json({ ok: false, error: "No autenticado." });
+  return res.redirect("/login.html");
+});
+
+// Estáticos (index.html, login.html, etc.) — DESPUÉS del control de sesión.
+app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
 // Proveedor de IA (Cerebras por defecto; configurable por variables de entorno).

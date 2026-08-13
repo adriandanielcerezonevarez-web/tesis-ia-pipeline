@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Validador Arce-Cerezo · Iniciar sesión</title>
+<style>
+  :root { --azul:#1e3a8a; --azul2:#2749a8; --cyan:#0ea5e9; --texto:#1f2937; --gris:#6b7280; --linea:#e5e7eb; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    font-family:'Segoe UI', Calibri, Arial, sans-serif; color:var(--texto);
+    background:linear-gradient(135deg,#eef2ff 0%,#e0f2fe 100%); padding:20px;
+  }
+  .card {
+    width:100%; max-width:400px; background:#fff; border:1px solid var(--linea);
+    border-radius:14px; box-shadow:0 10px 30px rgba(30,58,138,.12); padding:34px 30px;
+  }
+  .logo { font-size:19px; font-weight:700; color:var(--azul); margin-bottom:22px; }
+  .logo b { color:var(--cyan); }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .sub { color:var(--gris); font-size:14px; margin:0 0 22px; }
+  label { display:block; font-size:12px; font-weight:600; letter-spacing:.3px; color:var(--gris); text-transform:uppercase; margin:14px 0 6px; }
+  input {
+    width:100%; padding:11px 13px; font-size:15px; border:1px solid var(--linea);
+    border-radius:9px; background:#f8fafc; outline:none; transition:border .15s, box-shadow .15s;
+  }
+  input:focus { border-color:var(--azul); box-shadow:0 0 0 3px rgba(30,58,138,.12); background:#fff; }
+  button {
+    width:100%; margin-top:22px; padding:12px; font-size:15px; font-weight:700; color:#fff;
+    background:var(--azul); border:none; border-radius:9px; cursor:pointer; transition:background .15s;
+  }
+  button:hover { background:var(--azul2); }
+  button:disabled { opacity:.6; cursor:default; }
+  .error { display:none; margin-top:14px; padding:10px 12px; font-size:13px; border-radius:8px;
+    background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+  .pie { margin-top:22px; text-align:center; font-size:12px; color:var(--gris); }
+  .pie b { color:var(--azul); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Validador <b>Arce-Cerezo</b></div>
+    <h1>Iniciar sesión</h1>
+    <p class="sub">Introduce tus credenciales para acceder al validador.</p>
+
+    <form id="form">
+      <label for="usuario">Usuario</label>
+      <input id="usuario" name="usuario" type="text" autocomplete="username" required autofocus>
+
+      <label for="clave">Contraseña</label>
+      <input id="clave" name="clave" type="password" autocomplete="current-password" required>
+
+      <button id="btn" type="submit">Entrar</button>
+      <div id="error" class="error"></div>
+    </form>
+
+    <div class="pie">Validador de código con IA · <b>Arce-Cerezo</b></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('form');
+    const btn = document.getElementById('btn');
+    const errorBox = document.getElementById('error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Entrando…';
+      try {
+        const resp = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            usuario: document.getElementById('usuario').value.trim(),
+            clave: document.getElementById('clave').value
+          })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.location.href = '/';
+          return;
+        }
+        errorBox.textContent = data.error || 'No se pudo iniciar sesión.';
+        errorBox.style.display = 'block';
+      } catch (err) {
+        errorBox.textContent = 'Error de conexión. Intenta de nuevo.';
+        errorBox.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Entrar';
+      }
+    });
+  </script>
+</body>
+</html>

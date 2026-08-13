@@ -38,6 +38,10 @@
     display:flex; align-items:center; justify-content:space-between; padding:0 24px; position:sticky; top:0; z-index:10; }
   .topbar h1 { font-size:16px; font-weight:600; }
   .topbar .estado { font-size:12px; color:var(--text-muted); }
+  .topbar-right { display:flex; align-items:center; gap:14px; }
+  .btn-logout { font-size:12px; font-weight:600; color:var(--text-muted); background:transparent;
+    border:1px solid var(--border); border-radius:var(--radius); padding:6px 12px; cursor:pointer; transition:all .15s; }
+  .btn-logout:hover { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
   .content { padding:24px; max-width:960px; }
   .card { background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg);
     box-shadow:var(--shadow); padding:20px; margin-bottom:18px; }
@@ -95,13 +99,16 @@
     <button class="nav-item" onclick="ver('reportes')">Reportes IA</button>
     <button class="nav-item" onclick="ver('acerca')">Acerca de</button>
   </nav>
-  <div class="sidebar-footer">Modelo Z.ai GLM 4.7 <br/>Arce-Cerezo · Tesis</div>
+  <div class="sidebar-footer">Modelo GLM 4.7 (open source)<br/>Arce-Cerezo · Tesis</div>
 </aside>
 
 <main>
   <div class="topbar">
     <h1 id="titulo">Analizar código</h1>
-    <div class="estado" id="estado">Listo</div>
+    <div class="topbar-right">
+      <div class="estado" id="estado">Listo</div>
+      <button class="btn-logout" onclick="cerrarSesion()" title="Cerrar sesión">Cerrar sesión</button>
+    </div>
   </div>
   <div class="content">
 
@@ -145,7 +152,7 @@
         <p>El usuario sube su código y la app aplica un proceso CI/CD con IA: analiza la calidad en 7 dimensiones,
         entrega un reporte descargable en PDF, y según la puntuación permite desplegar automáticamente
         (integrándose al sistema del usuario) o corregir el código —manualmente o con la IA— hasta que sea apto.</p>
-        <p style="margin-top:10px">Modelo: <b>GZ.ai GLM 4.7</b> (open source, vía Cerebras). Independiente de cualquier plataforma.</p>
+        <p style="margin-top:10px">Modelo: <b>GPT-OSS 120B</b> (open source, vía Cerebras). Independiente de cualquier plataforma.</p>
       </div>
     </div>
 
@@ -158,6 +165,12 @@
 const $ = (id) => document.getElementById(id);
 let codigoActual = "";
 let nombreActual = "";
+
+// Cierra la sesión: borra la cookie en el servidor y vuelve al login.
+async function cerrarSesion() {
+  try { await fetch("/api/logout", { method: "POST" }); } catch (e) { /* ignorar */ }
+  window.location.href = "/login.html";
+}
 
 function ver(sec) {
   const titulos = { analizar: "Analizar código", reportes: "Reportes IA", acerca: "Acerca de" };
@@ -228,11 +241,11 @@ function renderReporte(a, corregido, progresion, cambios) {
 
   let acciones = "";
   if (apto) {
-    acciones = `<div class="aviso ok">Código apto (≥ 7). Puede desplegarse automáticamente.</div>
+    acciones = `<div class="aviso ok">Código apto (≥ 8). Puede desplegarse automáticamente.</div>
       <div class="row"><button class="btn btn-ok" onclick="pedirDespliegue()">Desplegar automáticamente</button>
       <button class="btn btn-ghost" onclick="descargarPDF()">Descargar reporte PDF</button></div>`;
   } else {
-    acciones = `<div class="aviso warn">Código no apto (&lt; 7). Elige cómo corregirlo:</div>
+    acciones = `<div class="aviso warn">Código no apto (&lt; 8). Elige cómo corregirlo:</div>
       <div class="row">
         <button class="btn btn-warn" onclick="corregirManual()">Lo corrijo yo</button>
         <button class="btn btn-primary" onclick="corregirIA()">Que lo corrija la IA</button>
