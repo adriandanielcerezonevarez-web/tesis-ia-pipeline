@@ -147,32 +147,6 @@ jobs:
               cuerpo += 'La IA no aplicó cambios (no encontró un parche seguro sobre las líneas modificadas).\n\n';
             }
 
-            // Tabla "qué se cambió / por qué / mejora" + código corregido (como en la app web del validador).
-            try {
-              const res = JSON.parse(fs.readFileSync('resumen-cambios.json', 'utf8'));
-              for (const [archivo, info] of Object.entries(res)) {
-                const lista = info.cambios || [];
-                if (lista.length) {
-                  cuerpo += '### 🧾 Cambios aplicados en `' + archivo + '`\n\n';
-                  cuerpo += '| Qué se cambió | Por qué | Mejora |\n|---|---|---|\n';
-                  for (const c of lista) {
-                    const q = String(c.que || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-                    const p = String(c.porque || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-                    const m = String(c.mejora || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-                    cuerpo += '| ' + q + ' | ' + p + ' | ' + m + ' |\n';
-                  }
-                  cuerpo += '\n';
-                }
-                let codigo = info.codigo || '';
-                if (codigo) {
-                  const ext = (archivo.split('.').pop() || '').toLowerCase();
-                  if (codigo.length > 12000) codigo = codigo.substring(0, 12000) + '\n// … (código truncado, ver Files changed) …';
-                  cuerpo += '<details><summary>Ver código corregido de <code>' + archivo + '</code></summary>\n\n';
-                  cuerpo += '```' + ext + '\n' + codigo + '\n```\n\n</details>\n\n';
-                }
-              }
-            } catch (e) {}
-
             cuerpo += '<details><summary>Ver reporte de calidad tras la corrección</summary>\n\n';
             try {
               cuerpo += fs.readFileSync('reporte-despues.md', 'utf8').substring(0, 50000);
